@@ -6,9 +6,9 @@ import numpy as np
 ######### HELPER METHODS ###########
 ####################################
 
-def load_images(path='./C001R_Cut'):
+def load_images(path='./C001R_Cut', img_type='jpg'):
     frames = []
-    paths = [f for f in os.listdir(path) if f.endswith('jpg')]
+    paths = [f for f in os.listdir(path) if f.endswith(img_type)]
     print(f'INFO>Found this frames in folder {path}: {paths}')
 
     for p in paths:
