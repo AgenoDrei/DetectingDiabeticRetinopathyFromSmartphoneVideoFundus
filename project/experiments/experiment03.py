@@ -1,28 +1,31 @@
-from utils import  load_image, show_image, load_images, show_image_row, print_progress_bar
+from utils import  load_image, show_image, load_images, show_image_row, print_progress_bar, get_retina_mask
 import cv2
 import numpy as np
 import sys
 from sklearn.cluster import KMeans
 
-NUM_CLUSTERS = 5
+NUM_CLUSTERS = 6
 CONTRAST_LIMIT = 4
 np.set_printoptions(threshold=sys.maxsize)
 
 def run():
-    image = load_image('./C001R_Cut/C001R01.jpg')
+    image = load_image('/home/simon/Videos/Anomaly Dataset/raw_images/SNAP_00035.png')
     image2 = load_image('./C001R_Cut/C001R04.jpg')
     show_image_row([image, image2])
 
     image, image2 = enhance_contrast_image(image), enhance_contrast_image(image2)
     show_image_row([image, image2])
 
-    image, image2 = cv2.medianBlur(image, 5), cv2.medianBlur(image, 5)
+    image_mask = get_retina_mask(image)
+    image = cv2.bitwise_and(image, cv2.cvtColor(image_mask, cv2.COLOR_GRAY2BGR))
+
+    image, image2 = cv2.medianBlur(image, 5), cv2.medianBlur(image2, 5)
     show_image_row([image, image2])
 
     cluster_image(image)
-    cluster_image(image2)
+    #cluster_image(image2)
 
-    #ft, ft2 = get_features(image), get_features(image2)
+    ft, ft2 = get_features(image), get_features(image2)
     #matcher = create_matcher()
     #matches = matcher.match(ft['ft'], ft2['ft'])
     #matches = sorted(matches, key=lambda x: x.distance)
@@ -46,7 +49,7 @@ def cluster_image(img:np.array):
     center[2] = np.array([60, 255, 255])
     center[3] = np.array([90, 255, 255])
     center[4] = np.array([120, 255, 255])
-    #center[5] = np.array([150, 255, 255])
+    center[5] = np.array([150, 255, 255])
     #center[6] = np.array([179, 255, 255])
 
     center = np.uint8(center)
@@ -68,8 +71,8 @@ def cluster_image(img:np.array):
 
 
 def get_features(img:np.array):
-    #descriptor = cv2.xfeatures2d.SIFT_create()
-    descriptor = cv2.ORB_create()
+    descriptor = cv2.xfeatures2d.SIFT_create()
+    #descriptor = cv2.ORB_create()
     img_kp = img.copy()
     (kps, features) = descriptor.detectAndCompute(img, None)
 
