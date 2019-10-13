@@ -3,17 +3,19 @@ import cv2
 from matplotlib import pyplot as plt
 import numpy as np
 import sys
-NUM_CLUSTERS = 8
+NUM_CLUSTERS = 6
 
 def run():
-    images = load_images('/home/simon/Videos/Anomaly Dataset/raw_images/', img_type='png')
+    #images = load_images('/home/simon/Videos/Anomaly Dataset/raw_images/', img_type='png')
+    images = load_images('./C001R_Cut/', img_type='jpg')
+    images = [enhance_contrast_image(img, clip_limit=3) for img in images]
 
-    images_subset = [images[i] for i in range(0, len(images), 5)]
-    images_subset = [cv2.bitwise_and(img, get_retina_mask(img, enhance_contrast=True, contrast_clip_limit=4)) for img in images_subset]
+    #images_subset = [images[i] for i in range(0, len(images), 5)]
+    #images_subset = [cv2.bitwise_and(img, get_retina_mask(img, enhance_contrast=True, contrast_clip_limit=4)) for img in images_subset]
     #show_image_row(images_subset, name='Raw images')
-    train_gmm(images_subset)
 
-    segement_image(cv2.bitwise_and(enhance_contrast_image(images[9]), get_retina_mask(images[9], enhance_contrast=True, contrast_clip_limit=3)))
+    train_gmm(images)
+    [segement_image(img) for img in images]
 
 
 def train_gmm(imgs:list) -> None:
@@ -72,7 +74,9 @@ def show_means(means:np.array, weights):
     show_image(cv2.cvtColor(show_strip, cv2.COLOR_HSV2BGR))
 
 
-
+def get_hsv_colors(n:int):
+    colors = np.array((n, 3), dtype=np.uint8)
+    np.arange(0, 180)
 
 
 '''

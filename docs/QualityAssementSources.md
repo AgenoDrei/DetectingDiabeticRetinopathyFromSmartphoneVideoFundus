@@ -12,6 +12,5 @@
 | Color | Reasoning and proof for the color metric described above. | Theoretical | Paper | [Link](https://infoscience.epfl.ch/record/33994/files/HaslerS03.pdf) |
 | Correction | Thresholding method to remove simple, clearling visible light glares from images. | Remove white reflections from images | Blog entry | [Link](https://towardsdatascience.com/anomaly-detection-in-images-777534980aeb) |
 | Detection | Detect image with anomalies (for example wall cracks) with a Neural Network. Also use the network to compute an activation map showing the relevant parts of the image. | Detecting errors in pictures and pinpointing their locations | Blog entry | [Link](https://towardsdatascience.com/anomaly-detection-in-images-777534980aeb) |
-
-
+| Quality | Compute overall quality of an image without using any reference images. The algorithm is called BRISQE| Determine the quality and shaprness of camera images to discard unuseful ones | Blog entry | [Link](https://towardsdatascience.com/automatic-image-quality-assessment-in-python-391a6be52c11) |
 
