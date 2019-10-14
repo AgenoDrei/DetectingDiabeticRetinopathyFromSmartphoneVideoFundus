@@ -17,7 +17,11 @@ def run():
     show_image_row(images_subset, name='Raw images')
 
     #train_gmm(images_subset)
-    [segement_image(img, use_colors=True) for img in images_subset]
+    #prop = segement_image(images_subset[0], use_colors=True)
+    #show_single_class(1, images_subset[0], prop)
+    props = [segement_image(img, use_colors=True) for img in images_subset]
+    [show_single_class(1, img, props[i]) for i, img in enumerate(images_subset)]
+
 
 
 def train_gmm(imgs:list) -> None:
@@ -37,9 +41,9 @@ def train_gmm(imgs:list) -> None:
 
     em.save('gmm_model_1.mod')
     print('INFO> Training done. Saving model to gmm_model_1.mod')
-    print(em.getMeans())
-    print(em.getCovs())
-    print(em.getWeights())
+    #print(em.getMeans())
+    #print(em.getCovs())
+    #print(em.getWeights())
 
     show_means(em.getMeans(), em.getWeights())
 
@@ -68,6 +72,21 @@ def segement_image(img:np.array, use_colors=False):
     seg_img = np.uint8(seg_img)
     #print(counts)
     show_image_row([cv2.cvtColor(seg_img, cv2.COLOR_HSV2BGR), cv2.cvtColor(img, cv2.COLOR_HSV2BGR)])
+    return result
+
+def show_single_class(rel_class:int, img:np.array, props:np.array, threshold=0.001):
+    img_data = img.reshape(img.shape[0] * img.shape[1], 3)
+    props = props[:, rel_class]
+
+    #img_data = np.array([(0, 0, 255) for (i, pixel) in enumerate(img_data) if props[i] > threshold])
+    for i, pixel in enumerate(img_data):
+        if props[i] > threshold:
+            img_data[i, :] = (0, 255, 0)
+
+    img_data = img_data.reshape(img.shape)
+    img_data = np.uint8(img_data)
+    show_image(img_data)
+
 
 
 def show_means(means:np.array, weights):
