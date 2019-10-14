@@ -9,7 +9,7 @@ import numpy as np
 def load_images(path='./C001R_Cut', img_type='jpg'):
     frames = []
     paths = [f for f in os.listdir(path) if f.endswith(img_type)]
-    print(f'INFO> Found this frames in folder {path}: {paths}')
+    print(f'UTIL> Found {len(paths)} frames in folder {path}: {paths}')
 
     for p in paths:
         image_path = os.path.join(os.getcwd(), path, p)
@@ -19,7 +19,7 @@ def load_images(path='./C001R_Cut', img_type='jpg'):
     return frames
 
 def load_image(path:str):
-    print(f'INFO> Loading picture {path}')
+    print(f'UTIL> Loading picture {path}')
 
     image_path = os.path.join(os.getcwd(), path)
     image = cv2.imread(image_path)
@@ -64,26 +64,40 @@ def print_progress_bar (iteration, total, prefix ='', suffix ='', decimals = 1, 
 
 ################### Image functions ##################
 
-def get_retina_mask(img:np.array, min_radius=450, enhance_contrast=False, contrast_clip_limit=-1) -> np.array:
+def get_retina_mask(img:np.array, radius_reduction=20, hough_param=85) -> np.array:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img_blur = cv2.medianBlur(gray, 3)
-    circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 3, minRadius=min_radius, maxRadius=600,
-                               param1=75, param2=75)
+    img_blur = cv2.medianBlur(gray, 5)
+    mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
+    circle = None
 
-    if circles is not None:
-        circles = np.round(circles[0, :]).astype("int")
-        for (x, y, r) in circles:
-            #print('Circles: ', (x, y, r))
-            if y < img.shape[0] / 3 or y > img.shape[0] / 3 * 2 or x < img.shape[1] / 3 or x > img.shape[1] / 3 * 2:
-                continue
-            radius = 500 if r > 500 else r
-            mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
-            cv2.circle(mask, (x, y), r, (255, 255, 255,), thickness=-1)
-            return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-    elif enhance_contrast and contrast_clip_limit != -1:
-        img = enhance_contrast_image(img, clip_limit=contrast_clip_limit)
-        return get_retina_mask(img)
-    raise Exception('No circular lense detected!')
+    # detect small lens
+    small_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=400,
+                                     maxRadius=500, param1=hough_param, param2=hough_param)
+    if small_circles is not None:
+        small_circles = np.round(small_circles[0, :]).astype("int")
+        small_circles = [(x, y, r) for (x, y, r) in small_circles if
+                         img.shape[0] / 3 < y < img.shape[0] / 3 * 2 and img.shape[1] / 3 < x < img.shape[
+                             1] / 3 * 2]
+        circle = sorted(small_circles, key=lambda xyr: xyr[2])[0]
+
+    if circle is None:  # detect large lens
+        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=500,
+                                         maxRadius=600, param1=hough_param, param2=hough_param)
+        if large_circles is not None:
+            large_circles = np.round(large_circles[0, :]).astype("int")
+            large_circles = [(x, y, r) for (x, y, r) in large_circles if
+                             img.shape[0] / 3 < y < img.shape[0] / 3 * 2 and img.shape[1] / 3 < x < img.shape[
+                                 1] / 3 * 2]
+            circle = sorted(large_circles, key=lambda xyr: xyr[2])[0]
+
+    if circle is not None:
+        (x, y, r) = circle
+        r -= radius_reduction
+        cv2.circle(mask, (x, y), r, (255, 255, 255,), thickness=-1)
+        return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
+    print('UTIL> No mask found')
+    return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
 
 def enhance_contrast_image(img:np.array, clip_limit=3.0):
