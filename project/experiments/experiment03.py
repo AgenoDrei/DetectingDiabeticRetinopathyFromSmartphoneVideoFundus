@@ -4,7 +4,7 @@ import numpy as np
 import sys
 from sklearn.cluster import KMeans
 
-NUM_CLUSTERS = 6
+NUM_CLUSTERS = 5
 CONTRAST_LIMIT = 4
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -17,7 +17,7 @@ def run():
     show_image_row([image, image2])
 
     image_mask = get_retina_mask(image)
-    image = cv2.bitwise_and(image, cv2.cvtColor(image_mask, cv2.COLOR_GRAY2BGR))
+    image = cv2.bitwise_and(image, image_mask)
 
     image, image2 = cv2.medianBlur(image, 5), cv2.medianBlur(image2, 5)
     show_image_row([image, image2])
@@ -49,7 +49,7 @@ def cluster_image(img:np.array):
     center[2] = np.array([60, 255, 255])
     center[3] = np.array([90, 255, 255])
     center[4] = np.array([120, 255, 255])
-    center[5] = np.array([150, 255, 255])
+    #center[5] = np.array([150, 255, 255])
     #center[6] = np.array([179, 255, 255])
 
     center = np.uint8(center)
@@ -71,8 +71,8 @@ def cluster_image(img:np.array):
 
 
 def get_features(img:np.array):
-    descriptor = cv2.xfeatures2d.SIFT_create()
-    #descriptor = cv2.ORB_create()
+    #descriptor = cv2.xfeatures2d.SIFT_create()
+    descriptor = cv2.ORB_create()
     img_kp = img.copy()
     (kps, features) = descriptor.detectAndCompute(img, None)
 

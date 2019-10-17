@@ -112,3 +112,24 @@ def enhance_contrast_image(img:np.array, clip_limit=3.0):
     limg = cv2.merge((cl, a, b))
     final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
     return final
+
+
+def show_means(means: np.array, weights):
+    show_strip = np.zeros((100, means.shape[0] * 100, means.shape[1]))
+    progress = 0
+    for i, mean in enumerate(means):
+        start, stop = int(progress), int(progress + weights[0, i] * 100 * means.shape[0])
+        show_strip[0:100, start:stop, :] = mean
+        progress += weights[0, i] * 100 * means.shape[0]
+
+    show_strip = np.uint8(show_strip)
+    print(show_strip.shape)
+    show_image(cv2.cvtColor(show_strip, cv2.COLOR_HSV2BGR))
+
+
+def get_hsv_colors(n: int):
+    colors = np.zeros((n, 3), dtype=np.uint8)
+    hue = np.arange(0, 180, 180 / n)
+    colors[:, 0] = hue
+    colors[:, 1] = colors[:, 2] = 255
+    return colors
