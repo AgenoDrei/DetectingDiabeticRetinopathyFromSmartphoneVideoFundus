@@ -11,6 +11,7 @@ def run():
     show_image(image)
 
     show_channels(image)
+    show_channels(image, show_hsv_channels=True)
 
     image = enhance_contrast_image(image, clip_limit=2.0)
     show_image(image)
@@ -56,9 +57,13 @@ def remove_glare_image(img:np.array, saturation_thres=75, value_thres=125):
     return cv2.inpaint(img, glare_green, 5, cv2.INPAINT_NS)
 
 
-def show_channels(img:np.array) -> None:
+def show_channels(img:np.array, show_hsv_channels=False) -> None:
+    if show_hsv_channels:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     channels = cv2.split(img)
     show_image_row(channels, 'channels: Blue - green - red')
+    if show_hsv_channels:
+        img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
 
 def amplify_red_channel(img:np.array, coeff=1.1) -> np.array:
     img = np.float32(img.copy())
