@@ -26,7 +26,7 @@ def load_image(path:str):
     return image
 
 
-def show_image(data:np.array, name:str='Single Image', w:int=800, h:int=600, time=0):
+def show_image(data:np.array, name:str='Single Image', w:int=1200, h:int=900, time=0):
     cv2.namedWindow(name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(name, w, h)
     cv2.imshow(name, data)
