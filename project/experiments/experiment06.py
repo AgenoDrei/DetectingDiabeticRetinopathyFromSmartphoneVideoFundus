@@ -2,34 +2,25 @@ import numpy as np
 import cv2
 import sys
 
-from utils import  load_image, show_image, enhance_contrast_image, show_image_row
+from utils import  load_image, show_image, enhance_contrast_image, show_image_row, float2gray
 
 np.set_printoptions(threshold=sys.maxsize)
 
 def run() -> None:
-    # image = load_image(path='./C001R_Cut/C001R08.jpg')
-    image = load_image('/home/simon/ownCloud/Data/SFBI Studie/optimal_quality_control/BI0696.Zeiss_crop.jpg')
-    # image = load_image('/home/simon/Downloads/Retinal-blood-vessel-segmentation-in-high-resolution-fundus-images-a-Fundus.jpg')
+    image = load_image(path='./C001R_Cut/C001R08.jpg')
+    # image = load_image('/home/simon/ownCloud/Data/SFBI Studie/high_quality/SL0601.WM0289.P1.04.H.VQPQ2105.PNG')
+    #image = load_image('/home/simon/Downloads/Retinal-blood-vessel-segmentation-in-high-resolution-fundus-images-a-Fundus.jpg')
     show_image(image, 'Raw')
     top = (image.shape[0] - image.shape[1]) // 2
-    #image = image[top:top+image.shape[1], :]
+    image = image[top:top+image.shape[1], :]
 
     blue, blue_mean, blue_dev = extract_background_pixel(image[:, :, 0], grid_size=10, t=0.95)
     green, green_mean, green_dev = extract_background_pixel(image[:, :, 1], grid_size=10, t=0.95)
     red, red_mean, red_dev = extract_background_pixel(image[:, :, 2], grid_size=10, t=0.95)
 
-    show_image_row([float2gray(green), float2gray(red), float2gray(blue)])
-
-    result = cv2.merge([float2gray(blue), float2gray(green), float2gray(red)])
-    show_image(result, name='Result np')
-    result2 = cv2.merge([float2gray(blue_dev * blue + blue_mean), float2gray(green_dev * green + green_mean),
+    result = cv2.merge([float2gray(blue_dev * blue + blue_mean), float2gray(green_dev * green + green_mean),
                          float2gray(red * red_dev + red_mean)])
-    show_image(result2, name='Result normalized')
-
-    #A = np.array([1 / blue_dev, 1 / green_dev, 1 / red_dev], dtype=np.float64) * np.eye(3)
-    #B = np.array()
-    #print(A.shape)
-    show_image_row([image, result, result2], 'Result')
+    show_image_row([image, result], 'Result')
 
 
 def extract_background_pixel(img:np.array, grid_size:int=10, t:float=1) -> np.array:
@@ -41,7 +32,7 @@ def extract_background_pixel(img:np.array, grid_size:int=10, t:float=1) -> np.ar
     bg_img = np.zeros(img.shape, dtype=np.float64)
     mean_img, dev_img = estimate_mean_dev(img, size=grid_size)
 
-    show_image_row([float2gray(mean_img), float2gray(dev_img)], name='mean - dev')
+    #show_image_row([float2gray(mean_img), float2gray(dev_img)], name='mean - dev')
 
     dist_img = cv2.absdiff(img, mean_img)
     dist_img = cv2.divide(dist_img, dev_img)
@@ -84,10 +75,6 @@ def estimate_mean_dev(img:np.array, mask: np.array = None, size: int = 10):
     mean_img = cv2.resize(mean_img, img.shape, interpolation=cv2.INTER_CUBIC)
     dev_img = cv2.resize(dev_img, img.shape, interpolation=cv2.INTER_CUBIC)
     return mean_img, dev_img
-
-
-def float2gray(img:np.array):
-    return np.uint8(cv2.normalize(img, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX))
 
 
 if __name__ == '__main__':

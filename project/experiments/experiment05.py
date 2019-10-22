@@ -1,12 +1,12 @@
-from utils import load_image, show_image, load_images, show_image_row, print_progress_bar, enhance_contrast_image, \
-    get_retina_mask, get_hsv_colors, show_means
-import cv2
-from matplotlib import pyplot as plt
-import numpy as np
 import sys
+import matplotlib.pyplot as plt
+import cv2
+import numpy as np
+from utils import show_image, load_images, show_image_row, enhance_contrast_image, \
+    get_retina_mask, get_hsv_colors, show_means, float2gray, print_progress_bar
 
 NUM_CLUSTERS = 5
-MODEL = 'gmm_model_2.mod'
+MODEL = 'gmm_model_v2.mod'
 ARTIFACT_THRESHOLD = 0.05
 MATRIX_TYPE = cv2.ml.EM_COV_MAT_GENERIC
 
@@ -15,18 +15,22 @@ def run():
     images = load_images('/home/simon/Videos/Anomaly Dataset/raw_images/', img_type='png')
     images2 = load_images('./C001R/', img_type='png')
 
-    images_subset = [images[i] for i in range(0, len(images), 12)]
-    images_subset.extend([images2[i] for i in range(0, len(images2), 2)])
+    images_subset = [images[i] for i in range(0, len(images))]
+    images_subset.extend([images2[i] for i in range(0, len(images2))])
     images_subset = [enhance_contrast_image(img, clip_limit=4) for img in images_subset]
     images_subset = [cv2.bitwise_and(img, get_retina_mask(img)) for img in images_subset]
-    #show_image_row(images_subset, name='Raw images')
+    show_image_row(images_subset, name='Raw images')
 
     #train_gmm(images_subset)
-    #prop = segement_image(images_subset[5], use_colors=True, show_result=True)
-    #show_two_classes((4, 2), images_subset[5], prop, threshold=(0.05, 0.9))
 
-    props = [segement_image(img, use_colors=True, show_result=False) for img in images_subset]
-    [show_two_classes((4, 2), img, props[i], threshold=(0.01, 0.99)) for i, img in enumerate(images_subset)]
+    # props = [segement_image(img, use_colors=True, show_result=False) for img in images_subset]
+    # [show_single_class(4, img, props[i], threshold=0.05) for i, img in enumerate(images_subset)]
+
+    masked_images = []
+    for i, img in enumerate(images_subset):
+        masked_images.append(cv2.bitwise_and(img, get_glare_mask(img)))
+
+    [show_image(img, name='Masked images') for img in masked_images]
 
 
 def test_thresholds(images:list) -> None:
@@ -42,17 +46,19 @@ def train_gmm(imgs: list) -> None:
     imgs = [img.reshape(img.shape[0] * img.shape[1], 3) for img in imgs]
     samples = np.vstack(imgs)
 
-    print(samples.shape)
-    samples = np.array([sample for sample in samples if not np.array_equal(sample, [0, 0, 0])])
+    print('INFO> Raw sample size: ',  samples.shape)
+    #samples = np.array([sample for sample in samples if not np.array_equal(sample, [0, 0, 0])])
+    samples = samples[~np.all(samples == 0, axis=1)]
+    print('INFO> Reduced sample size: ', samples.shape)
 
     print('INFO> No model found, training GMM...')
-    criterion = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.1)
+    criterion = (cv2.TERM_CRITERIA_EPS, 100, 0.01)
     em.setTermCriteria(criterion)
     em.setClustersNumber(NUM_CLUSTERS)
     em.setCovarianceMatrixType(MATRIX_TYPE)
     retval, logLikelihoods, labels, probs = em.trainEM(samples)
 
-    em.save('gmm_model_2.mod')
+    em.save('gmm_model_3.mod')
     print(f'INFO> Training done. Saving model to {MODEL}')
     # print(em.getMeans())
     # print(em.getCovs())
@@ -71,22 +77,21 @@ def segement_image(img: np.array, use_colors=False, show_result=False):
     # seg_img = np.zeros(img_data.shape)
     # counts = np.zeros((NUM_CLUSTERS, 1))
 
-    ret, result = em.predict(np.float32(img_data))
-    best_guess = np.argmax(result, axis=1)
-    seg_img = colors[best_guess] if use_colors else means[best_guess]
+    test_data = img_data[~np.all(img_data == 0, axis=1)]
+    #print(test_data.shape)
 
-    # for i, sample in enumerate(img_data):
-    #    ret, result = em.predict2(sample)
-    #    counts[np.argmax(result)] += 1
-    #    color = means[np.argmax(result)] if use_colors == False else colors[np.argmax(result)]
-    #    seg_img[i,:] = color
+    ret, result = em.predict(np.float32(test_data))
+    result_backprojection_data = np.zeros((img_data.shape[0], NUM_CLUSTERS))
+    result_backprojection_data[~np.all(img_data == 0, axis=1)] = result
+    best_guess = np.argmax(result_backprojection_data, axis=1)
+    seg_img = colors[best_guess] if use_colors else means[best_guess]
 
     seg_img = seg_img.reshape(img.shape)
     seg_img = np.uint8(seg_img)
     # print(counts)
     if show_result:
         show_image_row([cv2.cvtColor(seg_img, cv2.COLOR_HSV2BGR), cv2.cvtColor(img, cv2.COLOR_HSV2BGR)])
-    return result
+    return result_backprojection_data
 
 
 def show_single_class(rel_class: int, img: np.array, props: np.array, threshold=ARTIFACT_THRESHOLD, write_to_file=False):
@@ -126,6 +131,27 @@ def show_two_classes(classes: (int, int), img: np.array, props: np.array, thresh
     show_image(img_data)
     if write_to_file:
         cv2.imwrite(f'output/gmm_class_{classes}_threshold_{threshold}.jpg', img_data)
+
+
+def get_probability_map(class_idx: int, props: np.array, image: np.array) -> np.array:
+    prop = props[:, class_idx]
+    map = prop.reshape((image.shape[0], image.shape[1]))
+    #map = np.log10(map)
+
+    map = cv2.GaussianBlur(map, (7, 7), 0)
+    return float2gray(map)
+
+
+def get_glare_mask(image: np.array, show_mask: bool = False, relevant_segment: int = 4) -> np.array:
+    prop = segement_image(image, use_colors=True, show_result=False)
+    prop_map = get_probability_map(relevant_segment, prop, image)
+    # prop_map_th = cv2.adaptiveThreshold(prop_map, maxValue=255, adaptiveMethod=cv2.ADAPTIVE_THRESH_MEAN_C,k
+    #                      thresholdType=cv2.THRESH_BINARY, blockSize=11, C=2)
+    ret2, prop_map_th = cv2.threshold(prop_map, thresh=0, maxval=255, type=cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    if show_mask:
+        show_image_row([prop_map, prop_map_th], name='Probability map + threshold')
+    return cv2.cvtColor(prop_map_th, code=cv2.COLOR_GRAY2BGR)
 
 
 '''

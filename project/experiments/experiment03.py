@@ -1,8 +1,11 @@
-from utils import  load_image, show_image, load_images, show_image_row, print_progress_bar, get_retina_mask
+from utils import  load_image, show_image, load_images, show_image_row, print_progress_bar, get_retina_mask, get_hsv_colors
 import cv2
 import numpy as np
 import sys
-from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+from matplotlib import colors
 
 NUM_CLUSTERS = 5
 CONTRAST_LIMIT = 4
@@ -23,6 +26,7 @@ def run():
     show_image_row([image, image2])
 
     cluster_image(image)
+    visualize_color_space(image)
     #cluster_image(image2)
 
     ft, ft2 = get_features(image), get_features(image2)
@@ -42,31 +46,14 @@ def cluster_image(img:np.array):
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
     ret, label, center = cv2.kmeans(Z, NUM_CLUSTERS, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
 
-    print(center[2])
-
-    center[0] = np.array([0, 255, 255])
-    center[1] = np.array([30, 255, 255])
-    center[2] = np.array([60, 255, 255])
-    center[3] = np.array([90, 255, 255])
-    center[4] = np.array([120, 255, 255])
-    #center[5] = np.array([150, 255, 255])
-    #center[6] = np.array([179, 255, 255])
-
+    center[0:NUM_CLUSTERS] = get_hsv_colors(NUM_CLUSTERS)
     center = np.uint8(center)
     res = center[label.flatten()]
     res2 = res.reshape((img.shape))
 
     res2 = cv2.cvtColor(res2, cv2.COLOR_HSV2BGR)
     img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
-
-    #img[np.reshape((label == 2), img.shape[0:2])] = (255, 255, 255)
-
     show_image_row([res2, img], name='Result clustering')
-
-    #clt = KMeans(n_clusters=NUM_CLUSTERS)
-    #clt.fit(img_data)
-
-    #print(clt.labels_, clt.cluster_centers_)
     return img
 
 
@@ -98,6 +85,22 @@ def enhance_contrast_image(img:np.array):
     final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
     return final
 
+
+def visualize_color_space(img:np.array) -> None:
+    show_image(img, name='Pre-colorspace calc')
+    r, g, b = cv2.split(img)
+    fig = plt.figure()
+    axis = fig.add_subplot(1, 1, 1, projection="3d")
+    pixel_colors = img.reshape((np.shape(img)[0] * np.shape(img)[1], 3))
+    norm = colors.Normalize(vmin=-1., vmax=1.)
+    norm.autoscale(pixel_colors)
+    pixel_colors = norm(pixel_colors).tolist()
+
+    axis.scatter(r.flatten(), g.flatten(), b.flatten(), facecolors=pixel_colors, marker=".")
+    axis.set_xlabel("Red")
+    axis.set_ylabel("Green")
+    axis.set_zlabel("Blue")
+    plt.show()
 
 '''
 Experimenting with clustering / anomaliy detection

@@ -1,12 +1,14 @@
 import os
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 ####################################
 ######### HELPER METHODS ###########
 ####################################
 
-def load_images(path='./C001R_Cut', img_type='jpg'):
+
+def load_images(path: str = './C001R_Cut', img_type:str = 'jpg') -> list:
     frames = []
     paths = [f for f in os.listdir(path) if f.endswith(img_type)]
     print(f'UTIL> Found {len(paths)} frames in folder {path}: {paths}')
@@ -18,7 +20,8 @@ def load_images(path='./C001R_Cut', img_type='jpg'):
 
     return frames
 
-def load_image(path:str):
+
+def load_image(path: str) -> np.array:
     print(f'UTIL> Loading picture {path}')
 
     image_path = os.path.join(os.getcwd(), path)
@@ -26,7 +29,7 @@ def load_image(path:str):
     return image
 
 
-def show_image(data:np.array, name:str='Single Image', w:int=1200, h:int=900, time=0):
+def show_image(data: np.array, name: str = 'Single Image', w: int = 1200, h: int = 900, time: int = 0) -> None:
     cv2.namedWindow(name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(name, w, h)
     cv2.imshow(name, data)
@@ -34,7 +37,7 @@ def show_image(data:np.array, name:str='Single Image', w:int=1200, h:int=900, ti
     cv2.destroyAllWindows()
 
 
-def show_image_row(data:list, name:str='Image stack', time=0):
+def show_image_row(data:list, name: str = 'Image stack', time: int = 0) -> None:
     max_height:int = 0
     acc_width: int = 0
     for img in data:
@@ -62,9 +65,13 @@ def print_progress_bar (iteration, total, prefix ='', suffix ='', decimals = 1, 
     if iteration == total:
         print()
 
+
+def float2gray(img: np.array) -> np.array:
+    return np.uint8(cv2.normalize(img, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX))
+
 ################### Image functions ##################
 
-def get_retina_mask(img:np.array, radius_reduction=20, hough_param=85) -> np.array:
+def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 85) -> np.array:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
@@ -100,7 +107,7 @@ def get_retina_mask(img:np.array, radius_reduction=20, hough_param=85) -> np.arr
     return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
 
-def enhance_contrast_image(img:np.array, clip_limit=3.0):
+def enhance_contrast_image(img:np.array, clip_limit: float = 3.0) -> None:
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
@@ -114,7 +121,7 @@ def enhance_contrast_image(img:np.array, clip_limit=3.0):
     return final
 
 
-def show_means(means: np.array, weights):
+def show_means(means: np.array, weights) -> None:
     show_strip = np.zeros((100, means.shape[0] * 100, means.shape[1]))
     progress = 0
     for i, mean in enumerate(means):
@@ -127,9 +134,16 @@ def show_means(means: np.array, weights):
     show_image(cv2.cvtColor(show_strip, cv2.COLOR_HSV2BGR))
 
 
-def get_hsv_colors(n: int):
+def get_hsv_colors(n: int) -> np.array:
     colors = np.zeros((n, 3), dtype=np.uint8)
     hue = np.arange(0, 180, 180 / n)
     colors[:, 0] = hue
     colors[:, 1] = colors[:, 2] = 255
     return colors
+
+
+def plot_historgram_one_channel(img: np.array) -> None:
+    hist = cv2.calcHist([img], channels=[0], mask=None, histSize=[256], ranges=[0, 256])
+    plt.plot(hist, color='r')
+    plt.xlim([1, 256])
+    plt.show()
