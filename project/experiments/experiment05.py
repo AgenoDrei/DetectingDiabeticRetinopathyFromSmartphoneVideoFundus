@@ -6,19 +6,20 @@ from utils import show_image, load_images, show_image_row, enhance_contrast_imag
     get_retina_mask, get_hsv_colors, show_means, float2gray, print_progress_bar
 
 NUM_CLUSTERS = 5
-MODEL = 'gmm_model_4.mod'
+MODEL = 'gmm_model_3.mod'
 ARTIFACT_THRESHOLD = 0.05
 MATRIX_TYPE = cv2.ml.EM_COV_MAT_GENERIC
 
 
 class Glare_Remover:
-    def __init__(self, num_cluster: int = 5, model_path='./gmm_model_3.mod', matrix_type = cv2.ml.EM_COV_MAT_GENERIC):
+    def __init__(self, num_cluster: int = 5, masked_class: int = 1, model_path='./gmm_model_3.mod', matrix_type = cv2.ml.EM_COV_MAT_GENERIC):
         self.n = num_cluster
         self.model_path = model_path
         self.data = []
         self.criterion =  (cv2.TERM_CRITERIA_EPS, 100, 0.01)
         self.matrix_type = matrix_type
         self.current_model = None
+        self.masked_class = masked_class
 
     def train(self) -> None:
         assert len(self.data) is not 0
@@ -104,16 +105,21 @@ class Glare_Remover:
         map = cv2.GaussianBlur(map, (7, 7), 0)
         return float2gray(map)
 
-    def get_glare_mask(self, image: np.array, relevant_segment: int, show_mask: bool = False) -> np.array:
+    def get_glare_mask(self, image: np.array, show_mask: bool = False) -> np.array:
         prop = self.predict(image, use_colors=True, show_result=False)
-        prop_map = self.get_probability_map(relevant_segment, prop, image)
+        prop_map = self.get_probability_map(self.masked_class, prop, image)
         # prop_map_th = cv2.adaptiveThreshold(prop_map, maxValue=255, adaptiveMethod=cv2.ADAPTIVE_THRESH_MEAN_C,k
         #                      thresholdType=cv2.THRESH_BINARY, blockSize=11, C=2)
         ret2, prop_map_th = cv2.threshold(prop_map, thresh=0, maxval=255, type=cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
         if show_mask:
             show_image_row([prop_map, prop_map_th], name='Probability map + threshold')
-        return cv2.cvtColor(prop_map_th, code=cv2.COLOR_GRAY2BGR)
+        return prop_map_th
+
+    def get_glare_percentage(self, image: np.array, mask: np.array):
+        num_pixels = (~np.all(image == 0, axis=2)).sum()
+        num_masked_pixels = (mask == 0).sum()
+        return num_masked_pixels / (num_pixels + 1) * 100
 
 
 def run():
@@ -122,24 +128,24 @@ def run():
     images = load_images('/home/simon/Videos/Anomaly Dataset/raw_images/', img_type='png')
     images2 = load_images('./C001R/', img_type='png')
 
-    images_subset = [images[i] for i in range(0, len(images), 4)]
+    images_subset = [images[i] for i in range(0, len(images), 8)]
     images_subset = [cv2.bitwise_and(img, get_retina_mask(enhance_contrast_image(img))) for img in images_subset]
     unglarer.set_training_data(images_subset)
 
-    images_subset = [cv2.bitwise_and(img, get_retina_mask(enhance_contrast_image(img))) for img in images2]
-    unglarer.set_training_data(images_subset)
+    #images_subset = [cv2.bitwise_and(img, get_retina_mask(enhance_contrast_image(img))) for img in images2]
+    #unglarer.set_training_data(images_subset)
 
     #unglarer.show_training_data()
     #unglarer.train()
     unglarer.show_means()
 
-    masked_images = [cv2.bitwise_and(img, unglarer.get_glare_mask(img, relevant_segment=0)) for img in unglarer.get_training_data()]
-    [show_image(img, name='Masked images') for img in masked_images]
+    masked_images = []
+    for img in unglarer.get_training_data():
+        mask = unglarer.get_glare_mask(img, show_mask=False)
+        percentage = unglarer.get_glare_percentage(img, mask)
+        masked_images.append((cv2.bitwise_and(img, cv2.cvtColor(mask, code=cv2.COLOR_GRAY2BGR)), percentage))
 
-    #train_gmm(images_subset)
-
-    # props = [segement_image(img, use_colors=True, show_result=False) for img in images_subset]
-    # [show_single_class(4, img, props[i], threshold=0.05) for i, img in enumerate(images_subset)]
+    [show_image(img, name=f'Masked images - {percentage:.2f}%') for img, percentage in masked_images]
 
 
 
