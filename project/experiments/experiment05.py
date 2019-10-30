@@ -125,7 +125,7 @@ class Glare_Remover:
 def run():
     unglarer: Glare_Remover = Glare_Remover(model_path=MODEL)
 
-    images = load_images('/home/simon/Videos/Anomaly Dataset/raw_images/', img_type='png')
+    images = load_images('/data/simon/Anomaly Dataset/raw_images/', img_type='png')
     images2 = load_images('./C001R/', img_type='png')
 
     images_subset = [images[i] for i in range(0, len(images), 8)]
@@ -187,6 +187,7 @@ def show_two_classes(classes: (int, int), img: np.array, props: np.array, thresh
     show_image(img_data)
     if write_to_file:
         cv2.imwrite(f'output/gmm_class_{classes}_threshold_{threshold}.jpg', img_data)
+
 
 
 
