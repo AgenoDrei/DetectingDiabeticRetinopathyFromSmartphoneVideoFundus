@@ -12,7 +12,7 @@ CONTRAST_LIMIT = 4
 np.set_printoptions(threshold=sys.maxsize)
 
 def run():
-    image = load_image('/home/simon/Videos/Anomaly Dataset/raw_images/SNAP_00035.png')
+    image = load_image('/data/simon/Anomaly Dataset/raw_images/SNAP_00035.png')
     image2 = load_image('./C001R_Cut/C001R04.jpg')
     show_image_row([image, image2])
 
@@ -23,10 +23,10 @@ def run():
     image = cv2.bitwise_and(image, image_mask)
 
     image, image2 = cv2.medianBlur(image, 5), cv2.medianBlur(image2, 5)
-    show_image_row([image, image2])
+    show_image_row([image, image2, cv2.cvtColor(image[:, :, 1], cv2.COLOR_GRAY2BGR)])
 
-    cluster_image(image)
-    visualize_color_space(image)
+    cluster_image(image2[:, :, 1])
+    #visualize_color_space(image)
     #cluster_image(image2)
 
     ft, ft2 = get_features(image), get_features(image2)
@@ -38,7 +38,7 @@ def run():
 
 
 def cluster_image(img:np.array):
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     #img_data = img.reshape((img.shape[0] * img.shape[1], 3))
     Z = img.reshape((-1, 3))
     Z = np.float32(Z)
@@ -52,7 +52,7 @@ def cluster_image(img:np.array):
     res2 = res.reshape((img.shape))
 
     res2 = cv2.cvtColor(res2, cv2.COLOR_HSV2BGR)
-    img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+    #img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     show_image_row([res2, img], name='Result clustering')
     return img
 

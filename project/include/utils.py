@@ -71,7 +71,7 @@ def float2gray(img: np.array) -> np.array:
 
 
 ################### Image functions ##################
-def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 85., return_circle_params: bool = False) -> np.array:
+def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 85.) -> (np.array, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
@@ -101,12 +101,10 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
         (x, y, r) = circle
         r -= radius_reduction
         cv2.circle(mask, (x, y), r, (255, 255, 255,), thickness=-1)
-        if return_circle_params:
-            return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (x, y, r)
-        return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), circle
 
     print('UTIL> No mask found')
-    return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
 
 
 def enhance_contrast_image(img:np.array, clip_limit: float = 3.0) -> None:

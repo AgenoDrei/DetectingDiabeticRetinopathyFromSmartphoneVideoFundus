@@ -11,16 +11,20 @@ def run():
     show_image(image)
 
     show_channels(image)
-    show_channels(image, show_hsv_channels=True)
+    show_channels(image, show_hsv_channels=False)
 
-    image = enhance_contrast_image(image, clip_limit=2.0)
-    show_image(image)
+    image_cl = enhance_contrast_image(image, clip_limit=4.0)
+    image_cl_blur = enhance_contrast_image(cv2.GaussianBlur(image, (7, 7), 0))
+    image_clg = clahe_green_channel(image, clip_limit=4.0, back_merge=False)
+    image_clg_blur = clahe_green_channel(cv2.GaussianBlur(image, (7, 7), 0), clip_limit=4.0, back_merge=False)
+    show_image_row([image_cl, image_cl_blur, image_clg, image_clg_blur], name='Green Clahe enhanced')
 
     #image = remove_glare_image(image)
     #show_image(image)
 
-    image = amplify_red_channel(image, coeff=RED_AMPLIFICATION_COEFF)
-    show_image(image, name=f'Red channel {RED_AMPLIFICATION_COEFF}')
+
+    #image = amplify_red_channel(image, coeff=RED_AMPLIFICATION_COEFF)
+    #show_image(image, name=f'Red channel {RED_AMPLIFICATION_COEFF}')
 
 def remove_glare_image(img:np.array, saturation_thres=75, value_thres=125):
     h, s, v = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2HSV))  # split into HSV components
@@ -61,9 +65,10 @@ def show_channels(img:np.array, show_hsv_channels=False) -> None:
     if show_hsv_channels:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     channels = cv2.split(img)
-    show_image_row(channels, 'channels: Blue - green - red')
+    show_image_row(channels, 'channels')
     if show_hsv_channels:
         img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+
 
 def amplify_red_channel(img:np.array, coeff=1.1) -> np.array:
     img = np.float32(img.copy())
@@ -73,6 +78,14 @@ def amplify_red_channel(img:np.array, coeff=1.1) -> np.array:
     img = np.clip(img, 0, 256)
     return np.uint8(img)
 
+
+def clahe_green_channel(img: np.array, clip_limit: float = 2.0, back_merge: bool = False):
+    green_channel = img[:, :, 1]
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+    green_enhanced = clahe.apply(green_channel)
+    if back_merge:
+        return cv2.merge([img[:, :, 0], green_enhanced, img[:, :, 2]])
+    return cv2.cvtColor(green_enhanced, code=cv2.COLOR_GRAY2BGR)
 
 '''
 Experimenting with a single image for preprocessing parameters
