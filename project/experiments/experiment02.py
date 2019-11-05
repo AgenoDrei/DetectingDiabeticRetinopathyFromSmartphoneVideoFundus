@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 import sys
-from utils import  load_image, show_image, enhance_contrast_image, show_image_row
+from utils import load_image, show_image, enhance_contrast_image, show_image_row, float2gray, plot_historgram_one_channel
 
 RED_AMPLIFICATION_COEFF = 1.1
 
@@ -10,18 +10,23 @@ def run():
     image = load_image(path='./C001R_Cut/C001R04.jpg')
     show_image(image)
 
-    show_channels(image)
     show_channels(image, show_hsv_channels=False)
 
-    image_cl = enhance_contrast_image(image, clip_limit=4.0)
-    image_cl_blur = enhance_contrast_image(cv2.GaussianBlur(image, (7, 7), 0))
-    image_clg = clahe_green_channel(image, clip_limit=4.0, back_merge=False)
-    image_clg_blur = clahe_green_channel(cv2.GaussianBlur(image, (7, 7), 0), clip_limit=4.0, back_merge=False)
-    show_image_row([image_cl, image_cl_blur, image_clg, image_clg_blur], name='Green Clahe enhanced')
+    #divide_smoothed_green_channel(image)
+
+
+    #image_cl = enhance_contrast_image(image, clip_limit=4, tile_size=16)
+    image_cl_blur_1 = enhance_contrast_image(cv2.GaussianBlur(image, (7, 7), 0), clip_limit=3, tile_size=8)
+    image_cl_blur_2 = enhance_contrast_image(cv2.GaussianBlur(image, (7, 7), 0), clip_limit=3, tile_size=16)
+    image_cl_blur_3 = enhance_contrast_image(cv2.GaussianBlur(image, (7, 7), 0), clip_limit=3, tile_size=24)
+
+    plot_historgram_one_channel(image[:, :, 1])
+    plot_historgram_one_channel(clahe_green_channel(image, clip_limit=5.0))
+
+    show_image_row([image[:, :, 1], clahe_green_channel(image, clip_limit=5.0)])
 
     #image = remove_glare_image(image)
     #show_image(image)
-
 
     #image = amplify_red_channel(image, coeff=RED_AMPLIFICATION_COEFF)
     #show_image(image, name=f'Red channel {RED_AMPLIFICATION_COEFF}')
@@ -85,7 +90,24 @@ def clahe_green_channel(img: np.array, clip_limit: float = 2.0, back_merge: bool
     green_enhanced = clahe.apply(green_channel)
     if back_merge:
         return cv2.merge([img[:, :, 0], green_enhanced, img[:, :, 2]])
-    return cv2.cvtColor(green_enhanced, code=cv2.COLOR_GRAY2BGR)
+    return green_enhanced
+
+
+def divide_smoothed_green_channel(img: np.array):
+    smooth = cv2.medianBlur(img[:, :, 1], 21)
+    smooth = smooth.astype('float64')
+    img = img[:, :, 1].astype('float64')
+
+    div = np.zeros(smooth.shape, dtype='float64')
+    mask = smooth == 0
+
+    div[~mask] = img[~mask] / smooth[~mask]
+    print(div.shape, img.shape)
+
+    show_image(float2gray(div), name='Smooth')
+    show_image(float2gray(smooth), name='Smooth')
+
+
 
 '''
 Experimenting with a single image for preprocessing parameters

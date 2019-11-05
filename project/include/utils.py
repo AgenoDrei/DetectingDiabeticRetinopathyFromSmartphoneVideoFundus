@@ -107,10 +107,10 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
     return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
 
 
-def enhance_contrast_image(img:np.array, clip_limit: float = 3.0) -> None:
+def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int = 8) -> None:
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
     cl = clahe.apply(l)
     #cl = cv2.equalizeHist(l)
     ca = clahe.apply(a)
@@ -130,7 +130,7 @@ def show_means(means: np.array, weights) -> None:
         progress += weights[0, i] * 100 * means.shape[0]
 
     show_strip = np.uint8(show_strip)
-    print(show_strip.shape)
+    #print(show_strip.shape)
     show_image(cv2.cvtColor(show_strip, cv2.COLOR_HSV2BGR))
 
 
@@ -144,6 +144,7 @@ def get_hsv_colors(n: int) -> np.array:
 
 def plot_historgram_one_channel(img: np.array) -> None:
     hist = cv2.calcHist([img], channels=[0], mask=None, histSize=[256], ranges=[0, 256])
-    plt.plot(hist, color='r')
-    plt.xlim([1, 256])
+    plt.plot(hist, 'g.')
+    plt.xlim([0, 255])
+    plt.ylim(0, max(hist))
     plt.show()
