@@ -1,16 +1,16 @@
 import numpy as np
 import cv2
 import sys
+sys.path.append('/data/simon/Code/MasterThesis/project/include')
 import time_wrap
-
 from utils import  load_image, show_image, enhance_contrast_image, show_image_row, float2gray, load_images, get_retina_mask
 from sklearn.decomposition import PCA
 
 #np.set_printoptions(threshold=sys.maxsize)
 
 def run() -> None:
-    images = load_images('/data/simon/Anomaly Dataset/raw_images/', img_type='png')
-    images.extend(load_images('./C001R/', img_type='png'))
+    images = load_images('/data/simon/ownCloud/Data/Reflection Dataset/raw_images/', img_type='png')
+    #images.extend(load_images('./C001R/', img_type='png'))
 
     images = [enhance_contrast_image(img, clip_limit=4) for img in images]
 

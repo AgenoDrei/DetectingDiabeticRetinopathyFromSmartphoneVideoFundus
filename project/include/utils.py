@@ -107,7 +107,7 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
     return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
 
 
-def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int = 8) -> None:
+def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int = 8) -> np.array:
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
@@ -119,6 +119,11 @@ def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int
     limg = cv2.merge((cl, a, b))
     final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
     return final
+
+
+def crop_to_circle(img: np.array, circle) -> np.array:
+    x, y, r = circle
+    return img[y - r:y + r, x - r:x + r, :]
 
 
 def show_means(means: np.array, weights) -> None:

@@ -1,26 +1,26 @@
 import numpy as np
 import cv2
 import sys
-
+sys.path.append('/data/simon/Code/MasterThesis/project/include')
 from utils import  load_image, show_image, enhance_contrast_image, show_image_row, float2gray
 
 np.set_printoptions(threshold=sys.maxsize)
 
 def run() -> None:
-    image = load_image(path='./C001R_Cut/C001R08.jpg')
-    # image = load_image('/home/simon/ownCloud/Data/SFBI Studie/high_quality/SL0601.WM0289.P1.04.H.VQPQ2105.PNG')
+    #image = load_image(path='./C001R_Cut/C001R08.jpg')
+    image = load_image('/data/simon/ownCloud/Data/SFBI Studie/optimal_quality_control/DN0687.Zeiss.jpg')
     #image = load_image('/home/simon/Downloads/Retinal-blood-vessel-segmentation-in-high-resolution-fundus-images-a-Fundus.jpg')
     show_image(image, 'Raw')
-    top = (image.shape[0] - image.shape[1]) // 2
-    image = image[top:top+image.shape[1], :]
+    top = (image.shape[1] - image.shape[0]) // 2
+    image = image[:, top:top+image.shape[0]]
 
-    blue, blue_mean, blue_dev = extract_background_pixel(image[:, :, 0], grid_size=10, t=0.95)
+    #blue, blue_mean, blue_dev = extract_background_pixel(image[:, :, 0], grid_size=10, t=0.95)
     green, green_mean, green_dev = extract_background_pixel(image[:, :, 1], grid_size=10, t=0.95)
-    red, red_mean, red_dev = extract_background_pixel(image[:, :, 2], grid_size=10, t=0.95)
+    #red, red_mean, red_dev = extract_background_pixel(image[:, :, 2], grid_size=10, t=0.95)
 
-    result = cv2.merge([float2gray(blue_dev * blue + blue_mean), float2gray(green_dev * green + green_mean),
-                         float2gray(red * red_dev + red_mean)])
-    show_image_row([image, result], 'Result')
+    #result = cv2.merge([float2gray(blue_dev * blue + blue_mean), float2gray(green_dev * green + green_mean),
+    #                     float2gray(red * red_dev + red_mean)])
+    #show_image_row([image, result], 'Result')
 
 
 def extract_background_pixel(img:np.array, grid_size:int=10, t:float=1) -> np.array:
