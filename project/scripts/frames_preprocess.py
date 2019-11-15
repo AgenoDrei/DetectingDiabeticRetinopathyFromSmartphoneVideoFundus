@@ -9,8 +9,20 @@ sys.path.append('/data/simon/Code/MasterThesis/project/include')
 import utils as utl
 
 
+def run(input_path, output_path):
+    paths = [f for f in os.listdir(input_path)]
+    print(f'PRE> Found {len(paths)} images in folder {input_path}: {paths}')
+
+    num_cpus = multiprocessing.cpu_count()
+    results = Parallel(n_jobs=num_cpus)(delayed(preprocess_images)(os.path.join(input_path, p)) for p in paths)  # n_jobs = number of processes
+    results = [ret for ret in results if type(ret) == np.ndarray]
+
+    [cv2.imwrite(f'{output_path}/{i}.jpg', results[i]) for i in range(len(results))]
+    return output_path
+
+
 def preprocess_images(image_path):
-    print(f'UTIL> Extracting lens, enhancing contrast and cropping image {image_path}')
+    print(f'PRE> Extracting lens, enhancing contrast and cropping image {image_path}')
     img = cv2.imread(image_path)
     if type(img) != np.ndarray:
         return None
@@ -30,15 +42,17 @@ if __name__== '__main__':
     a.add_argument("--input", help="path to video")
     a.add_argument("--output", help="path to images")
     args = a.parse_args()
-    print(args)
+    print('PRE> ', args)
 
-    paths = [f for f in os.listdir(args.input)]
-    print(f'UTIL> Found {len(paths)} images in folder {args.input}: {paths}')
+    run(args.input, args.output)
 
-    num_cpus = multiprocessing.cpu_count()
-    results = Parallel(n_jobs=num_cpus)(delayed(preprocess_images)(os.path.join(args.input, p)) for p in paths)  # n_jobs = number of processes
-    results = [ret for ret in results if type(ret) == np.ndarray]
-
-    [cv2.imwrite(f'{args.output}/{i}.jpg', results[i]) for i in range(len(results))]
+    # paths = [f for f in os.listdir(args.input)]
+    # print(f'UTIL> Found {len(paths)} images in folder {args.input}: {paths}')
+    #
+    # num_cpus = multiprocessing.cpu_count()
+    # results = Parallel(n_jobs=num_cpus)(delayed(preprocess_images)(os.path.join(args.input, p)) for p in paths)  # n_jobs = number of processes
+    # results = [ret for ret in results if type(ret) == np.ndarray]
+    #
+    # [cv2.imwrite(f'{args.output}/{i}.jpg', results[i]) for i in range(len(results))]
 
 
