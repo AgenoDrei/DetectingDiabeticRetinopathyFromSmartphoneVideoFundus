@@ -17,7 +17,7 @@ def run(input_path, output_path):
     results = Parallel(n_jobs=num_cpus)(delayed(preprocess_images)(os.path.join(input_path, p)) for p in paths)  # n_jobs = number of processes
     results = [ret for ret in results if type(ret) == np.ndarray]
 
-    [cv2.imwrite(f'{output_path}/{i}.jpg', results[i]) for i in range(len(results))]
+    [cv2.imwrite(f'{output_path}/{paths[i][:-4]}_{i}.jpg', results[i]) for i in range(len(results))]
     return output_path
 
 
