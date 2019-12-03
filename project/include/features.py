@@ -41,7 +41,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         num_cpus = multiprocessing.cpu_count()
         X_trans = Parallel(n_jobs=num_cpus)(delayed(self.extract_single_feature_vector)(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X)
         # X_trans = [self.extract_single_feature_vector(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X]
-        print(f'FEAT> {np.array(X_trans).shape}')
+        # print(f'FEAT> {np.array(X_trans).shape}')
         return np.array(X_trans)
 
     def extract_single_feature_vector(self, x, distance, size, limit):
