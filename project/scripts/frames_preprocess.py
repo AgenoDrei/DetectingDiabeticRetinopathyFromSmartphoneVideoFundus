@@ -11,18 +11,17 @@ import utils as utl
 
 def run(input_path, output_path):
     paths = [f for f in os.listdir(input_path)]
-    print(f'PRE> Found {len(paths)} images in folder {input_path}: {paths}')
+    print(f'PRE> Extracting lens, enhancing contrast and cropping image for {len(paths)} images in folder {input_path}: {paths}')
 
     num_cpus = multiprocessing.cpu_count()
     results = Parallel(n_jobs=num_cpus)(delayed(preprocess_images)(os.path.join(input_path, p)) for p in paths)  # n_jobs = number of processes
     results = [ret for ret in results if type(ret) == np.ndarray]
 
-    [cv2.imwrite(f'{output_path}/{paths[i][:-4]}_{i}.jpg', results[i]) for i in range(len(results))]
+    [cv2.imwrite(f'{output_path}/{paths[i][:-4]}.jpg', results[i]) for i in range(len(results))]
     return output_path
 
 
 def preprocess_images(image_path):
-    print(f'PRE> Extracting lens, enhancing contrast and cropping image {image_path}')
     img = cv2.imread(image_path)
     if type(img) != np.ndarray:
         return None

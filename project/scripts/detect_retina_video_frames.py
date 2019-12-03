@@ -6,11 +6,10 @@ sys.path.append('../include/')
 import frame_extract as fe
 import frames_preprocess as fp
 import features as ft
+import time_wrap as tw
 from os.path import join
-import numpy as np
 import cv2
 import joblib as job
-from sklearn import preprocessing, metrics, svm, compose
 import shutil
 import multiprocessing
 
@@ -20,22 +19,21 @@ SUBFOLDER_PROCESSED = 'processed'
 SUBFOLDER_RESULTS = 'results'
 NUM_HARALICK_FEATURES = 84
 
-
-def run(input_path, output_path, model_path, transformer_path):
+@tw.profile
+def run(input_path, output_path, model_path):
     init(output_path)
-    frames_path = fe.extract_images(input_path, join(output_path, SUBFOLDER_FRAMES), input_path.split('/')[-1], time_between_frames=500)
+    frames_path = fe.extract_images(input_path, join(output_path, SUBFOLDER_FRAMES), input_path.split('/')[-1], time_between_frames=750)
     processed_frames_path = fp.run(frames_path, join(output_path, SUBFOLDER_PROCESSED))
 
-    model: svm.SVC = job.load(model_path)
-    transformer: compose.ColumnTransformer = job.load(transformer_path)
+    pipeline = job.load(model_path)
+    extractor = ft.FeatureExtractor(haralick_dist=4, clip_limit=4.0, hist_size=[8, 3, 3])
 
     X_test, index = create_dataset(processed_frames_path)
-    X_test = np.array(X_test)
-    X_test = transformer.transform(X_test)
-    y_pred = model.predict(X_test)
+    X_test = extractor.transform(X_test)
+    y_pred = pipeline.predict(X_test)
 
-    print(f'SVM found {sum(y_pred)} retina frames')
-    print(f'Writing frames to {join(output_path, SUBFOLDER_RESULTS)}')
+    print(f'VPRO> SVM found {sum(y_pred)} retina frames')
+    print(f'VPRO> Writing frames to {join(output_path, SUBFOLDER_RESULTS)}')
     [os.rename(join(processed_frames_path, index[i]), join(output_path, SUBFOLDER_RESULTS, index[i])) for i, y in enumerate(y_pred) if y == 1]
 
 
@@ -50,14 +48,14 @@ def init(output_path):
 
 def create_dataset(path):
     files = os.listdir(path)
-    print(f'Reading {len(files)} from {path} into dataset')
+    print(f'VPRO> Reading {len(files)} from {path} into dataset')
 
     files = [f for f in files if os.stat(join(path, f)).st_size > 0]  # removes empty images in image list
 
     num_cpus = multiprocessing.cpu_count()
-    results = job.Parallel(n_jobs=num_cpus)(job.delayed(ft.extract_feature_vector)(cv2.imread(join(path, p))) for p in files)
+    x = job.Parallel(n_jobs=num_cpus)(job.delayed(cv2.imread)(join(path, f)) for f in files)
 
-    return results, files
+    return x, files
 
 
 # def create_dataset(processed_frames_path):
@@ -78,9 +76,9 @@ if __name__== '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("--input", help="path to video")
     a.add_argument("--output", help="path to useful images")
-    a.add_argument("--model", help="path to SVM pretrained model")
-    a.add_argument("--transformer", help="path to Scaler from the pretrained model")
+    a.add_argument("--pipeline", help="path to SVM pretrained model")
+    #a.add_argument("--transformer", help="path to Scaler from the pretrained model")
     args = a.parse_args()
-    print(args)
+    print('VPRO> ', args)
 
-    run(args.input, args.output, args.model, args.transformer)
+    run(args.input, args.output, args.pipeline)

@@ -70,6 +70,26 @@ def float2gray(img: np.array) -> np.array:
     return np.uint8(cv2.normalize(img, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX))
 
 
+def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
+    if pref_size[0] == img.shape[0] and pref_size[1] == img.shape[1]:
+        return img
+
+    horizontal_pad = (pref_size[1] - img.shape[1]) // 2
+    vertical_pad = (pref_size[0] - img.shape[0]) // 2
+
+    padded_img = np.zeros((pref_size[0], pref_size[1], 3))
+    padded_img[vertical_pad:vertical_pad+img.shape[0], horizontal_pad:horizontal_pad+img.shape[1]] = img
+
+    # padded_img = np.pad(img, [(vertical_pad, vertical_pad), (horizontal_pad, horizontal_pad)], mode='constant')
+    # if padded_img.shape[0] < pref_size[0]:
+    #     padded_img = np.pad(padded_img, [(0, 1), (0, 0)], mode='constant')
+    # elif padded_img.shape[1] < pref_size[1]:
+    #     padded_img = np.pad(padded_img, [(0, 0), (0, 1)], mode='constant')
+
+    #print(f'UTILS> Pref: {pref_size}, Padded: {padded_img.shape}')
+    return padded_img
+
+
 ################### Image functions ##################
 def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 85.) -> (np.array, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -79,7 +99,7 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
 
     # detect small lens
     small_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=400,
-                                     maxRadius=500, param1=hough_param, param2=hough_param)
+                                     maxRadius=470, param1=hough_param, param2=hough_param)
     if small_circles is not None:
         small_circles = np.round(small_circles[0, :]).astype("int")
         small_circles = [(x, y, r) for (x, y, r) in small_circles if
@@ -88,8 +108,8 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
         circle = sorted(small_circles, key=lambda xyr: xyr[2])[0]
 
     if circle is None:  # detect large lens
-        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=500,
-                                         maxRadius=600, param1=hough_param, param2=hough_param)
+        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=471,
+                                         maxRadius=540, param1=hough_param, param2=hough_param)
         if large_circles is not None:
             large_circles = np.round(large_circles[0, :]).astype("int")
             large_circles = [(x, y, r) for (x, y, r) in large_circles if

@@ -19,15 +19,20 @@ def extract_images(image_path, output_path, name, time_between_frames=1000):
     print(f'EXTRACT> Extracting frames from {image_path}')
     count = 0
     vidcap = cv2.VideoCapture(image_path)
+    fps = vidcap.get(cv2.CAP_PROP_FPS)
+    frame_count = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
     success, image = vidcap.read()
     success = True
     while success:
-      vidcap.set(cv2.CAP_PROP_POS_MSEC,(count * time_between_frames))    # added this line
-      success,image = vidcap.read()
-      frame_path = os.path.join(output_path, name[:-4] + f'_{count}.jpg')
-      #print (f'Writing frame to: {frame_path}')
-      cv2.imwrite(frame_path, image)
-      count = count + 1
+        if time_between_frames is None:
+            time_between_frames = 100
+        vidcap.set(cv2.CAP_PROP_POS_MSEC,(count * time_between_frames))    # added this line
+        success,image = vidcap.read()
+        frame_path = os.path.join(output_path, name[:-4] + f'_{count}.jpg')
+        #print (f'Writing frame to: {frame_path}')
+        cv2.imwrite(frame_path, image)
+        count = count + 1
+
     return output_path
 
 
