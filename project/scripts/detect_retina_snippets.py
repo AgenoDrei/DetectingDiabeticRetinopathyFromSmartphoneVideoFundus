@@ -1,12 +1,8 @@
 import argparse
 import os
-import sys
 import time
 from skvideo import io
-sys.path.append('./')
-sys.path.append('../include/')
 import features as ft
-import time_wrap as tw
 import utils as utl
 import time_wrap as tw
 import numpy as np
@@ -14,7 +10,6 @@ from os.path import join
 import cv2
 import joblib as job
 import shutil
-import multiprocessing
 from tqdm import trange
 
 
@@ -23,7 +18,7 @@ SUBFOLDER_PROCESSED = 'processed'
 SUBFOLDER_RESULTS = 'results'
 NUM_HARALICK_FEATURES = 84
 FRAMES_PER_SNIPPET = 20
-BATCH_SIZE = 24
+BATCH_SIZE = 240
 
 
 @tw.profile
@@ -44,19 +39,19 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
     extract_frames(input_path, output_path, frames_per_second=fps)
 
     X_test = np.empty((0, 156), dtype=np.float)
-    file_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key= lambda f: int(os.path.splitext(f)[0]))
+    file_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key=lambda f: int(os.path.splitext(f)[0]))
     for i in trange(0, len(file_paths), BATCH_SIZE):
         start = time.monotonic()
-        print(f'VPRO> Start: {start:.2f}')
+        # print(f'VPRO> Start: {start:.2f}')
         frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_FRAMES, f)) for f in file_paths[i:i+BATCH_SIZE])
-        print(f'VPRO> After reading{time.monotonic()-start:.2f}')
+        # print(f'VPRO> After reading {time.monotonic()-start:.2f}')
         frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(preprocess_frames)(frame, output_path, i+j) for j, frame in enumerate(frames))
-        print(f'VPRO> After pp{time.monotonic()-start:.2f}')
+        # print(f'VPRO> After pp {time.monotonic()-start:.2f}')
         frames = [np.random.randint(0, 256, (850, 850, 3), dtype=np.uint8) if frames[j] is None or frames[j].size == 0 else frames[j] for j in
                   range(len(frames))]
         features = extractor.transform(frames)
-        print(f'VPRO> End: {time.monotonic()-start:.2f}')
-        #print(f'VPRO> Batch shape: {features.shape}, cur X_test shape: {X_test.shape}')
+        # print(f'VPRO> End: {time.monotonic()-start:.2f}')
+        # print(f'VPRO> Batch shape: {features.shape}, cur X_test shape: {X_test.shape}')
 
         X_test = np.append(X_test, features, axis=0)
 
@@ -92,18 +87,19 @@ def extract_frames(image_path: str, output_path: str, frames_per_second: int = 1
     prev = -1
     _, image = vidcap.read()
     print(f'SNIP> Extracting {frame_count // fps * frames_per_second} frames from {image_path}')
-    while count <= 6000:                                    # Max video size
-        count += 1
+    while count <= 5000:                                    # Max video size
         grabbed = vidcap.grab()
         if grabbed:
             time_s = vidcap.get(cv2.CAP_PROP_POS_MSEC) // time_between_frames
             if time_s > prev:
-                frames.append(vidcap.retrieve()[1])
+                cv2.imwrite(join(output_path, SUBFOLDER_FRAMES, f'{count}.jpg'), vidcap.retrieve()[1])
+                count += 1
+                #frames.append(vidcap.retrieve()[1])
             prev = time_s
         else:
             break
-    job.Parallel(n_jobs=-1)(job.delayed(cv2.imwrite)(join(output_path, SUBFOLDER_FRAMES, f'{i}.jpg'), frame) for i, frame in
-                            enumerate(frames[:len(frames)//FRAMES_PER_SNIPPET * FRAMES_PER_SNIPPET]))
+    #job.Parallel(n_jobs=-1)(job.delayed(cv2.imwrite)(join(output_path, SUBFOLDER_FRAMES, f'{i}.jpg'), frame) for i, frame in
+    #                        enumerate(frames[:len(frames)//FRAMES_PER_SNIPPET * FRAMES_PER_SNIPPET]))
 
 
 def preprocess_frames(img, out_path, idx):
@@ -141,13 +137,11 @@ def majority_vote(y_pred, majority: float = 0.65) -> list:
 
 @tw.profile
 def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10):
-    #snippets = [np.random.randint(0, 256, (850, 850, 3)) if snippets[i] is None or snippets[i].size == 0 else snippets[i] for i in range(len(snippets))]
-
-
     for start, end in idxs:
         frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_PROCESSED, f'{j}.jpg')) for j in range(start, end))
         frames = [np.random.randint(0, 256, (850, 850, 3)) if f is None or f.size == 0 else f for f in frames]
         max_size = max(frames, key=lambda img: img.shape[0]).shape[0]
+        avg_size = sum([f.shape[0] for f in frames])/len(frames)
         frames = [utl.pad_image_to_size(f, (max_size, max_size)) for f in frames]
 
         #out = cv2.VideoWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{i}.a'), cv2.VideoWriter_fourcc('H', '2', '6', '4'), fps, size)

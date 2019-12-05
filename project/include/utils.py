@@ -99,17 +99,16 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
 
     # detect small lens
     small_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=400,
-                                     maxRadius=470, param1=hough_param, param2=hough_param)
+                                     maxRadius=480, param1=hough_param, param2=hough_param)
     if small_circles is not None:
         small_circles = np.round(small_circles[0, :]).astype("int")
         small_circles = [(x, y, r) for (x, y, r) in small_circles if
                          img.shape[0] / 3 < y < img.shape[0] / 3 * 2 and img.shape[1] / 3 < x < img.shape[
                              1] / 3 * 2]
         circle = sorted(small_circles, key=lambda xyr: xyr[2])[0]
-
-    if circle is None:  # detect large lens
-        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=471,
-                                         maxRadius=540, param1=hough_param, param2=hough_param)
+    else:
+        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=480,
+                                         maxRadius=560, param1=hough_param, param2=hough_param)
         if large_circles is not None:
             large_circles = np.round(large_circles[0, :]).astype("int")
             large_circles = [(x, y, r) for (x, y, r) in large_circles if
@@ -122,9 +121,9 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
         r -= radius_reduction
         cv2.circle(mask, (x, y), r, (255, 255, 255,), thickness=-1)
         return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), circle
-
-    print('UTIL> No mask found')
-    return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
+    else:
+        print('UTIL> No mask found')
+        return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
 
 
 def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int = 8) -> np.array:
