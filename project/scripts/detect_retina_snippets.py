@@ -29,7 +29,7 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
     """
     :param input_path: path to input video
     :param output_path: path to folder for temporary and result files, will overwrite exiting folder
-    :param model_path: path to sklearn pipeline (created with experiment08.ipynb)
+    :param model_path: path to sklearn pipeline (created with snippet_extraction_training.ipynb)
     :param fps: number of frames that extracted per second of the video
     :param majority: percentage (0.0 to 1.0) of frames that have to show meaningful information
     :return:
