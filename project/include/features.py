@@ -11,11 +11,11 @@ def extract_feature_vector(X: np.array, bin_size: int = 16, haralick_dist: int =
     channels = cv2.split(X)
     features = []
     for c in channels:  # haarlick features
-        #texture_feat_mean: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=haralick_dist, return_mean=True)
+        # texture_feat_mean: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=haralick_dist, return_mean=True)
         texture_feat: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=haralick_dist, return_mean_ptp=True)
-        #ht_mean = textures.mean(axis=0)
-        #ht_range = np.ptp(textures, axis=0)
-        #f = np.hstack((texture_feat_mean, texture_feat_range))
+        # ht_mean = textures.mean(axis=0)
+        # ht_range = np.ptp(textures, axis=0)
+        # f = np.hstack((texture_feat_mean, texture_feat_range))
         features.append(texture_feat)
 
     img = utl.enhance_contrast_image(X, clip_limit=4.0, tile_size=12)
@@ -27,7 +27,7 @@ def extract_feature_vector(X: np.array, bin_size: int = 16, haralick_dist: int =
 
 
 class FeatureExtractor(BaseEstimator, TransformerMixin):
-    def __init__(self, haralick_dist: int = 4, hist_size = None, clip_limit = 4.0):
+    def __init__(self, haralick_dist: int = 4, hist_size=None, clip_limit=4.0):
         if hist_size is None:
             hist_size = [8, 3, 3]
         self.haralick_dist = haralick_dist
@@ -37,6 +37,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
 
+    @staticmethod
     def transform(self, X, y=None):
         num_cpus = multiprocessing.cpu_count()
         X_trans = Parallel(n_jobs=num_cpus)(delayed(self.extract_single_feature_vector)(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X)
@@ -48,12 +49,15 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         channels = cv2.split(cv2.cvtColor(x, cv2.COLOR_BGR2LAB))
         features = []
         for c in channels:  # haarlick features
-            texture_feat: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=distance, return_mean_ptp=True)
+            try:
+                texture_feat: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=distance, return_mean_ptp=True)
+            except ValueError:
+                texture_feat = np.zeros(28, dtype=np.float32)
             features.append(texture_feat)
 
         img = utl.enhance_contrast_image(x, clip_limit=limit, tile_size=12)
         hist = cv2.calcHist([cv2.cvtColor(img, cv2.COLOR_BGR2HSV)], [0, 1, 2], None, size, [0, 180, 0, 256, 0, 256])  # Histogram features
-        feat = np.hstack([np.hstack(features), hist.flatten()**0.25])
+        feat = np.hstack([np.hstack(features), hist.flatten() ** 0.25])
         return feat
 
     def get_params(self, deep=True):

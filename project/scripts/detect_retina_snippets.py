@@ -1,3 +1,6 @@
+import sys
+sys.path.append('/home/simon/Code/MasterThesis/project/include')
+sys.path.append('/home/simon/Code/MasterThesis/project/scripts')
 import argparse
 import os
 import time
@@ -18,7 +21,7 @@ SUBFOLDER_PROCESSED = 'processed'
 SUBFOLDER_RESULTS = 'results'
 NUM_HARALICK_FEATURES = 84
 FRAMES_PER_SNIPPET = 20
-BATCH_SIZE = 240
+BATCH_SIZE = 120
 
 
 @tw.profile
@@ -43,17 +46,22 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
     for i in trange(0, len(file_paths), BATCH_SIZE):
         start = time.monotonic()
         # print(f'VPRO> Start: {start:.2f}')
-        frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_FRAMES, f)) for f in file_paths[i:i+BATCH_SIZE])
+        # frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_FRAMES, f)) for f in file_paths[i:i+BATCH_SIZE])
         # print(f'VPRO> After reading {time.monotonic()-start:.2f}')
-        frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(preprocess_frames)(frame, output_path, i+j) for j, frame in enumerate(frames))
+        # frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(preprocess_frames)(frame, output_path, i+j) for j, frame in enumerate(frames))
         # print(f'VPRO> After pp {time.monotonic()-start:.2f}')
-        frames = [np.random.randint(0, 256, (850, 850, 3), dtype=np.uint8) if frames[j] is None or frames[j].size == 0 else frames[j] for j in
-                  range(len(frames))]
-        features = extractor.transform(frames)
+        # frames = [np.random.randint(0, 256, (850, 850, 3), dtype=np.uint8) if frames[j] is None or frames[j].size == 0 else frames[j] for j in
+        #          range(len(frames))]
+        # features = extractor.transform(frames)
         # print(f'VPRO> End: {time.monotonic()-start:.2f}')
         # print(f'VPRO> Batch shape: {features.shape}, cur X_test shape: {X_test.shape}')
 
+        features = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(process_batch_frame)(f, file_paths, output_path, extractor) for f in range(i, i+BATCH_SIZE))
+        features = np.array(features)
         X_test = np.append(X_test, features, axis=0)
+
+    if X_test.shape[0] == 0:
+        return
 
     y_pred = pipeline.predict(X_test)
 
@@ -64,6 +72,15 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
 
     write_snippets_to_disk(snippet_idxs, output_path, name=os.path.splitext(os.path.basename(input_path))[0], fps=fps)
 
+
+def process_batch_frame(idx: int, file_paths: str, output_path: str, extractor: ft.FeatureExtractor):
+    path = file_paths[idx] if idx < len(file_paths) else ''
+    frame = cv2.imread(join(output_path, SUBFOLDER_FRAMES, path))
+    frame = preprocess_frames(frame, output_path, idx)
+    frame = np.random.randint(0, 256, (850, 850, 3), dtype=np.uint8) if frame is None or frame.size == 0 else frame
+    feature_vec = extractor.extract_single_feature_vector(frame, extractor.haralick_dist, extractor.hist_size, extractor.clip_limit)
+
+    return feature_vec
 
 def init(output_path):
     if os.path.exists(output_path):
@@ -120,33 +137,37 @@ def preprocess_frames(img, out_path, idx):
 @tw.profile
 def create_dataset(frames: list):
     print(f'VPRO> Reading {len(frames)} into dataset')
-    frames = [np.random.randint(0, 256, (850, 850, 3), dtype=np.uint8) if frames[i] is None or frames[i].size == 0 else frames[i] for i in
+    frames = [np.zeros((850, 850, 3), dtype=np.uint8) if frames[i] is None or frames[i].size == 0 else frames[i] for i in
               range(1, len(frames))]
     return frames
 
 
 def majority_vote(y_pred, majority: float = 0.65) -> list:
     relevant_frames = []
+    max_votes = -1
     for i in range(0, len(y_pred), FRAMES_PER_SNIPPET):
         pos_votes = np.sum(y_pred[i:i+FRAMES_PER_SNIPPET])
+        max_votes = pos_votes if pos_votes > max_votes else max_votes
         if pos_votes >= majority * FRAMES_PER_SNIPPET:
-            relevant_frames.append((i, i+FRAMES_PER_SNIPPET))
+            relevant_frames.append((i, i+FRAMES_PER_SNIPPET, int(pos_votes / FRAMES_PER_SNIPPET * 100.0)))
 
+    print(f'VPRO> Max votes {max_votes}')
     return relevant_frames
 
 
 @tw.profile
 def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10):
-    for start, end in idxs:
+    for start, end, conf in idxs:
         frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_PROCESSED, f'{j}.jpg')) for j in range(start, end))
-        frames = [np.random.randint(0, 256, (850, 850, 3)) if f is None or f.size == 0 else f for f in frames]
-        max_size = max(frames, key=lambda img: img.shape[0]).shape[0]
+        frames = [np.zeros((850, 850, 3), dtype=np.uint8) if f is None or f.size == 0 else f for f in frames]
+        max_height = max(frames, key=lambda img: img.shape[0]).shape[0]
+        max_width = max(frames, key=lambda img: img.shape[1]).shape[1]
         avg_size = sum([f.shape[0] for f in frames])/len(frames)
-        frames = [utl.pad_image_to_size(f, (max_size, max_size)) for f in frames]
+        frames = [utl.pad_image_to_size(f, (max_height, max_width)) for f in frames]
 
         #out = cv2.VideoWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{i}.a'), cv2.VideoWriter_fourcc('H', '2', '6', '4'), fps, size)
-        out = io.FFmpegWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{start}.mp4'),
-                              inputdict={'-r': str(fps), '-s': f'{max_size}x{max_size}'},
+        out = io.FFmpegWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{conf}.mp4'),
+                              inputdict={'-r': str(fps), '-s': f'{max_width}x{max_height}'},
                               outputdict={'-vcodec': 'libx264', '-crf': '0', '-preset':'slow'})
         for frame in frames:
             out.writeFrame(frame[:,:,[2, 1, 0]])
