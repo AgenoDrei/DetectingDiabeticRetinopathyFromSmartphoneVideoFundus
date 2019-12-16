@@ -2,15 +2,16 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import skimage
+import cv2
 import os
 from torch.utils.data import Dataset
 from torchvision import utils
 from skimage import io
+from skimage import transform as trans
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, transform=None):
+    def __init__(self, csv_file, root_dir, file_type='.png', transform=None):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -20,6 +21,7 @@ class RetinaDataset(Dataset):
         """
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
+        self.file_type = file_type
         self.transform = transform
 
     def __len__(self):
@@ -29,11 +31,10 @@ class RetinaDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        img_name = os.path.join(self.root_dir, self.labels_df.iloc[idx, 0] + '.jpeg')
-        image = io.imread(img_name)
+        img_name = os.path.join(self.root_dir, self.labels_df.iloc[idx, 0] + self.file_type)
+        image = cv2.imread(img_name)[:,:,[2, 1, 0]]
 
-        severity = self.labels_df.iloc[idx, 1]
-        severity = 1 if severity > 1 else 0
+        severity = self.labels_df.iloc[idx, 2]
 
         sample = {'image': image, 'label': severity}
         if self.transform:
@@ -69,10 +70,8 @@ class RandomCrop(object):
             self.output_size = output_size
 
     def __call__(self, image):
-        h, w = image.shape[:2]
-
-        if h < self.output_size[0] or w < self.output_size[1]:
-            return skimage.transform.resize(image, self.output_size)
+        h, w, _ = image.shape
+        #image = trans.resize(image, (h, w))
 
         new_h, new_w = self.output_size
         top = np.random.randint(0, h - new_h)

@@ -8,10 +8,12 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from nn_utils import RandomCrop, RetinaDataset
+from nn_utils import RandomCrop, RetinaDataset, show_batch
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torchvision import transforms, models
+import matplotlib.pyplot as plt
+import numpy as np
 
 BASE_PATH = '/data/simon/'
 
@@ -19,18 +21,18 @@ BASE_PATH = '/data/simon/'
 def run():
     torch.cuda.empty_cache()
     data_transforms = transforms.Compose([
-        RandomCrop(1000),
+        RandomCrop(600),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    retina_dataset = RetinaDataset('/data/simon/trainLabels.csv', '/data/simon/retina_data', transform=data_transforms)
+    retina_dataset = RetinaDataset('/data/simon/processed_trainLabels.csv', '/data/simon/processed_retina_data', transform=data_transforms)
     train_size = int(0.9 * len(retina_dataset))
     test_size = len(retina_dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(retina_dataset, [train_size, test_size])
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
-    val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8, shuffle=True, num_workers=8)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=8)
+    val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=True, num_workers=8)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     print(f'Dataset info:\n Train size: {train_size},\n Test size: {test_size},\n Device: {device}')
@@ -50,16 +52,20 @@ def run():
     model_ft.fc = nn.Linear(num_ftrs, 2)
     model_ft = model_ft.to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    weights = np.array([0.25, 1.0])
+    cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
+    criterion = nn.CrossEntropyLoss(weight=cl_weights)
     optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
 
+    torch.cuda.empty_cache()
     model = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler, train_loader, device)
 
 
 def train_model(model, criterion, optimizer, scheduler, loader, device, num_epochs=25):
     since = time.time()
     best_acc = 0.0
+    model.to(device)
 
     for epoch in range(num_epochs):
         print(f'Epoch {epoch}/{num_epochs}')
@@ -70,8 +76,8 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
         running_corrects = 0
 
         # Iterate over data.
-        for batch in loader:
-            inputs = batch['image'].to(device)
+        for i, batch in enumerate(loader):
+            inputs = batch['image'].to(device, dtype=torch.float)
             labels = batch['label'].to(device)
 
             optimizer.zero_grad()
@@ -83,9 +89,10 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data)
+            running_corrects += torch.sum(preds == labels.data).item()
 
             scheduler.step()
+            # print('STEP ', i)
 
         epoch_loss = running_loss / len(loader.dataset)
         epoch_acc = running_corrects / len(loader.dataset)
