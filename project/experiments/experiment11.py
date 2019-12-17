@@ -8,20 +8,23 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from nn_utils import RandomCrop, RetinaDataset, show_batch
+from nn_utils import RandomCrop, RetinaDataset, show_batch, Flip
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torchvision import transforms, models
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn import metrics
 
-BASE_PATH = '/home/user/mueller9/'
+#BASE_PATH = '/home/user/mueller9/'
+BASE_PATH = '/data/simon/'
 
 
 def run():
     torch.cuda.empty_cache()
     data_transforms = transforms.Compose([
-        RandomCrop(600),
+        RandomCrop(500),
+        Flip(0.4),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -47,15 +50,15 @@ def run():
     #         plt.show()
     #         break
 
-    model_ft = models.resnet18(pretrained=True)
-    num_ftrs = model_ft.fc.in_features
-    model_ft.fc = nn.Linear(num_ftrs, 2)
-    model_ft = model_ft.to(device)
+    model_ft: nn.Module = models.Inception3(num_classes=2)
+    #num_ftrs = model_ft.fc.in_features
+    #model_ft.fc = nn.Linear(num_ftrs, 2)
+    #model_ft = model_ft.to(device)
 
-    weights = np.array([0.25, 1.0])
+    weights = np.array([1.0, 3.0])
     cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
     criterion = nn.CrossEntropyLoss(weight=cl_weights)
-    optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
+    optimizer_ft = optim.Adam(model_ft.parameters(), lr=0.001)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
 
     torch.cuda.empty_cache()
@@ -73,7 +76,7 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
         model.train()
 
         running_loss = 0.0
-        running_corrects = 0
+        running_preds = ([], [])
 
         # Iterate over data.
         for i, batch in enumerate(loader):
@@ -89,19 +92,20 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data).item()
+            running_preds[0].extend(preds.numpy())
+            running_preds[1].extend(labels.numpy())
 
             scheduler.step()
             # print('STEP ', i)
 
         epoch_loss = running_loss / len(loader.dataset)
-        epoch_acc = running_corrects / len(loader.dataset)
-        print(f'Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
+
+        print(f'Train Loss: {epoch_loss:.4f} Acc: {metrics.accuracy_score(running_preds[1], running_preds[0]):.4f}, AUC ROC: {metrics.roc_auc_score(running_preds[1], running_preds[0])}')
         print()
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-    print(f'Best val Acc: {best_acc:4f}')
+    #print(f'Best val Acc: {best_acc:4f}')
 
     torch.save(model.state_dict(), os.path.join(BASE_PATH, f'model{time.time()}.dat'))
     return model

@@ -80,6 +80,17 @@ class RandomCrop(object):
         return image
 
 
+class Flip(object):
+    def __init__(self, probability):
+        assert isinstance(probability, float)
+        self.prob = probability
+
+    def __call__(self, image):
+        if np.random.rand() < self.prob:
+            image = cv2.flip(image, 1)
+        return image
+
+
 class ToTensor(object):
     def __call__(self, image):
         # swap color axis because, DOES NOT NORMALIZE RIGHT NOW!
