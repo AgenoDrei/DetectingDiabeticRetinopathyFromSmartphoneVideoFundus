@@ -15,7 +15,7 @@ from torchvision import transforms, models
 import matplotlib.pyplot as plt
 import numpy as np
 
-BASE_PATH = '/data/simon/'
+BASE_PATH = '/home/user/mueller9/'
 
 
 def run():
@@ -26,14 +26,14 @@ def run():
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    retina_dataset = RetinaDataset('/data/simon/processed_trainLabels.csv', '/data/simon/processed_retina_data', transform=data_transforms)
+    retina_dataset = RetinaDataset(os.path.join(BASE_PATH, 'processed_trainLabels.csv'), os.path.join(BASE_PATH, 'processed_retina_data'), transform=data_transforms)
     train_size = int(0.9 * len(retina_dataset))
     test_size = len(retina_dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(retina_dataset, [train_size, test_size])
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=8)
-    val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=True, num_workers=8)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
+    val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8, shuffle=True, num_workers=8)
+    device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 
     print(f'Dataset info:\n Train size: {train_size},\n Test size: {test_size},\n Device: {device}')
 
