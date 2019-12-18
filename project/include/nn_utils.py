@@ -34,7 +34,7 @@ class RetinaDataset(Dataset):
         img_name = os.path.join(self.root_dir, self.labels_df.iloc[idx, 0] + self.file_type)
         image = cv2.imread(img_name)[:,:,[2, 1, 0]]
 
-        severity = self.labels_df.iloc[idx, 2]
+        severity = self.labels_df.iloc[idx, 1]
 
         sample = {'image': image, 'label': severity}
         if self.transform:

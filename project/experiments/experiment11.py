@@ -15,27 +15,39 @@ from torchvision import transforms, models
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn import metrics
+from torch.utils.tensorboard import SummaryWriter
 
-#BASE_PATH = '/home/user/mueller9/'
-BASE_PATH = '/data/simon/'
+BASE_PATH = '/home/user/mueller9/'
+#BASE_PATH = '/data/simon/'
 
 
 def run():
+    writer = SummaryWriter()
+
     torch.cuda.empty_cache()
     data_transforms = transforms.Compose([
-        RandomCrop(500),
+        RandomCrop(299),
         Flip(0.4),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    retina_dataset = RetinaDataset(os.path.join(BASE_PATH, 'processed_trainLabels.csv'), os.path.join(BASE_PATH, 'processed_retina_data'), transform=data_transforms)
+    retina_dataset = RetinaDataset(os.path.join(BASE_PATH, 'combined_retina_dataset.csv'), os.path.join(BASE_PATH, 'combined_retina_dataset'), transform=data_transforms)
     train_size = int(0.9 * len(retina_dataset))
     test_size = len(retina_dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(retina_dataset, [train_size, test_size])
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
-    val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8, shuffle=True, num_workers=8)
+    batch_size = 16
+    sample_weights = []
+    for d in train_dataset:
+        if d.label == 1:
+            sample_weights.append(1.0)
+        sample_weights.append(0.3)
+
+    sampler = torch.utils.data.sampler.WeightedRandomSampler(torch.Tensor(sample_weights).double(), batch_size)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, sampler=sampler, num_workers=16)
+    val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=8)
     device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 
     print(f'Dataset info:\n Train size: {train_size},\n Test size: {test_size},\n Device: {device}')
@@ -55,17 +67,17 @@ def run():
     #model_ft.fc = nn.Linear(num_ftrs, 2)
     #model_ft = model_ft.to(device)
 
-    weights = np.array([1.0, 3.0])
-    cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
-    criterion = nn.CrossEntropyLoss(weight=cl_weights)
+    #weights = np.array([1.0, 2.0])
+    #cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
+    criterion = nn.CrossEntropyLoss()
     optimizer_ft = optim.Adam(model_ft.parameters(), lr=0.001)
-    exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
+    exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.9)
 
     torch.cuda.empty_cache()
-    model = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler, train_loader, device)
+    model = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler, train_loader, device, writer)
 
 
-def train_model(model, criterion, optimizer, scheduler, loader, device, num_epochs=25):
+def train_model(model, criterion, optimizer, scheduler, loader, device, writer, num_epochs=50):
     since = time.time()
     best_acc = 0.0
     model.to(device)
@@ -84,7 +96,7 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
             labels = batch['label'].to(device)
 
             optimizer.zero_grad()
-            outputs = model(inputs)
+            outputs, _ = model(inputs)
             _, preds = torch.max(outputs, 1)
             loss = criterion(outputs, labels)
             loss.backward()
@@ -92,16 +104,19 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            running_preds[0].extend(preds.numpy())
-            running_preds[1].extend(labels.numpy())
+            running_preds[0].extend(preds.cpu().numpy())
+            running_preds[1].extend(labels.cpu().numpy())
 
-            scheduler.step()
+        scheduler.step()
             # print('STEP ', i)
 
         epoch_loss = running_loss / len(loader.dataset)
 
-        print(f'Train Loss: {epoch_loss:.4f} Acc: {metrics.accuracy_score(running_preds[1], running_preds[0]):.4f}, AUC ROC: {metrics.roc_auc_score(running_preds[1], running_preds[0])}')
-        print()
+        writer.add_scalar('Loss/train', epoch_loss)
+        writer.add_scalar('Accuracy/train', metrics.accuracy_score(running_preds[1], running_preds[0]))
+        writer.add_sclar('ROC/train', metrics.roc_auc_score(running_preds[1], running_preds[0]))
+        #print(f'Train Loss: {epoch_loss:.4f} Acc: {metrics.accuracy_score(running_preds[1], running_preds[0]):.4f}, AUC ROC: {metrics.roc_auc_score(running_preds[1], running_preds[0])}')
+        #print()
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
