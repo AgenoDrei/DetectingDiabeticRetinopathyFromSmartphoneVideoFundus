@@ -96,7 +96,7 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, writer, 
             labels = batch['label'].to(device)
 
             optimizer.zero_grad()
-            outputs, _ = model(inputs)
+            outputs, aux_outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             loss = criterion(outputs, labels)
             loss.backward()
