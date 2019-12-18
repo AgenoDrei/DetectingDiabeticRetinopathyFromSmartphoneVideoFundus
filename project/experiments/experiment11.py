@@ -23,7 +23,7 @@ BASE_PATH = '/data/simon/'
 def run():
     torch.cuda.empty_cache()
     data_transforms = transforms.Compose([
-        RandomCrop(500),
+        RandomCrop(299),
         Flip(0.4),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -84,7 +84,7 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, num_epoc
             labels = batch['label'].to(device)
 
             optimizer.zero_grad()
-            outputs = model(inputs)
+            outputs, aux_outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             loss = criterion(outputs, labels)
             loss.backward()
