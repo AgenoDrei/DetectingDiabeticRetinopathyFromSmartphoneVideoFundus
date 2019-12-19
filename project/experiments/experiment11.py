@@ -29,7 +29,7 @@ def run():
         RandomCrop(299),
         Flip(0.4),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
     retina_dataset = RetinaDataset(os.path.join(BASE_PATH, 'combined_retina_dataset.csv'), os.path.join(BASE_PATH, 'combined_retina_dataset'), transform=data_transforms)
@@ -38,15 +38,10 @@ def run():
     train_dataset, test_dataset = torch.utils.data.random_split(retina_dataset, [train_size, test_size])
 
     batch_size = 16
-    sample_weights = []
-    for d in train_dataset:
-        if d.label == 1:
-            sample_weights.append(1.0)
-        sample_weights.append(0.3)
+    sample_weights = [0.3 if d['label'] == 0 else 1.0 for d in train_dataset]
+    sampler = torch.utils.data.sampler.WeightedRandomSampler(torch.Tensor(sample_weights).double(), len(sample_weights))
 
-    sampler = torch.utils.data.sampler.WeightedRandomSampler(torch.Tensor(sample_weights).double(), batch_size)
-
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, sampler=sampler, num_workers=16)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, sampler=None, num_workers=16)
     val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=8)
     device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 
@@ -70,7 +65,7 @@ def run():
     #weights = np.array([1.0, 2.0])
     #cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
     criterion = nn.CrossEntropyLoss()
-    optimizer_ft = optim.Adam(model_ft.parameters(), lr=0.001)
+    optimizer_ft = optim.RMSprop(model_ft.parameters(), lr=0.01)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.9)
 
     torch.cuda.empty_cache()
@@ -112,9 +107,9 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, writer, 
 
         epoch_loss = running_loss / len(loader.dataset)
 
-        writer.add_scalar('Loss/train', epoch_loss)
-        writer.add_scalar('Accuracy/train', metrics.accuracy_score(running_preds[1], running_preds[0]))
-        writer.add_sclar('ROC/train', metrics.roc_auc_score(running_preds[1], running_preds[0]))
+        writer.add_scalar('Loss/train', epoch_loss, epoch)
+        writer.add_scalar('Accuracy/train', metrics.accuracy_score(running_preds[1], running_preds[0]), epoch)
+        writer.add_scalar('F1/train', metrics.f1_score(running_preds[1], running_preds[0]), epoch)
         #print(f'Train Loss: {epoch_loss:.4f} Acc: {metrics.accuracy_score(running_preds[1], running_preds[0]):.4f}, AUC ROC: {metrics.roc_auc_score(running_preds[1], running_preds[0])}')
         #print()
 
