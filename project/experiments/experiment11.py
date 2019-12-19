@@ -83,7 +83,7 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, writer, 
         model.train()
 
         running_loss = 0.0
-        running_preds = ([], [])
+        running_f1 = 0.0
 
         # Iterate over data.
         for i, batch in enumerate(loader):
@@ -99,17 +99,18 @@ def train_model(model, criterion, optimizer, scheduler, loader, device, writer, 
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            running_preds[0].extend(preds.cpu().numpy())
-            running_preds[1].extend(labels.cpu().numpy())
+            running_f1 += metrics.f1_score(labels.data, preds) * inputs.size(0)
+            writer.add_scalar('F1/batch/train', metrics.f1_score(labels.data, preds), epoch * len(loader.dataset) + i)
 
         scheduler.step()
             # print('STEP ', i)
 
         epoch_loss = running_loss / len(loader.dataset)
+        epoch_f1 = running_f1 / len(loader.dataset)
 
-        writer.add_scalar('Loss/train', epoch_loss, epoch)
-        writer.add_scalar('Accuracy/train', metrics.accuracy_score(running_preds[1], running_preds[0]), epoch)
-        writer.add_scalar('F1/train', metrics.f1_score(running_preds[1], running_preds[0]), epoch)
+        writer.add_scalar('Loss/epoch/train', epoch_loss, epoch)
+        #writer.add_scalar('Accuracy/train', metrics.accuracy_score(running_preds[1], running_preds[0]), epoch)
+        writer.add_scalar('F1/epoch/train', epoch_f1, epoch)
         #print(f'Train Loss: {epoch_loss:.4f} Acc: {metrics.accuracy_score(running_preds[1], running_preds[0]):.4f}, AUC ROC: {metrics.roc_auc_score(running_preds[1], running_preds[0])}')
         #print()
 
