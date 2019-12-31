@@ -1,12 +1,14 @@
 import time
+
 import os
 import sys
+
 import cv2
 import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from nn_utils import RandomNormalCrop, EnhanceContrast, RetinaDataset, show_batch, Flip
+from nn_utils import RandomNormalCrop, EnhanceContrast, RetinaDataset, show_batch, Flip, Blur
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torchvision import transforms, models
@@ -18,48 +20,23 @@ import joblib as job
 
 BASE_PATH = '/home/user/mueller9/'
 #BASE_PATH = '/data/simon/'
-GPU_ID = 'cuda:1'
-BATCH_SIZE = 8
+GPU_ID = 'cuda:2'
+BATCH_SIZE = 32
 
 def run():
     writer = SummaryWriter()
-    device = torch.device(GPU_ID if torch.cuda.is_available() else "cpu")
-    print(f'Using device {device}')
 
-    loaders = prepare_dataset('combined_retina_dataset.csv', 'combined_retina_dataset')
-    hyperparameter = {
-        'learning_rate': [1e-2, 1e-3, 3e-4, 1e-4, 3e-5],
-        'weight_decay': [0, 1e-3, 5e-4, 1e-4],
-        'num_epochs': 30,
-        'optimizer': [optim.Adam, optim.SGD]
-    }
-
-    model_ft: nn.Module = models.resnet18(pretrained=True)
-    num_ftrs = model_ft.fc.in_features
-    model_ft.fc = nn.Linear(num_ftrs, 2)
-
-    for i in np.arange(0.1, 1, 0.1):
-        print('Optimizing ', i)
-        optimizer_ft = optim.Adam(model_ft.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3]) 
-        weights = np.array([i, 1.0])
-        cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
-        criterion = nn.CrossEntropyLoss(weight=cl_weights)
-        step_scheduler = lr_scheduler.MultiStepLR(optimizer_ft, milestones=[30, 45], gamma=0.1)
-        torch.cuda.empty_cache()
-        model = train_model(model_ft, criterion, optimizer_ft, step_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
-
-
-def prepare_dataset(labels_path, images_path):
+    torch.cuda.empty_cache()
     data_transforms = transforms.Compose([
         RandomNormalCrop(448),
-        EnhanceContrast(0.5),
-        Flip(0.4),
+        EnhanceContrast(0.75),
+        Flip(0.5),
+        Blur(0.25),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    retina_dataset = RetinaDataset(os.path.join(BASE_PATH, labels_path), os.path.join(BASE_PATH, images_path),
-                                   transform=data_transforms)
+    retina_dataset = RetinaDataset(os.path.join(BASE_PATH, 'combined_retina_dataset.csv'), os.path.join(BASE_PATH, 'combined_retina_dataset'), transform=data_transforms)
     train_size = int(0.95 * len(retina_dataset))
     test_size = len(retina_dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(retina_dataset, [train_size, test_size])
@@ -69,12 +46,28 @@ def prepare_dataset(labels_path, images_path):
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, sampler=sampler, num_workers=16)
     val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=16)
-    print(f'Dataset info:\n Train size: {train_size},\n Test size: {test_size}')
+    device = torch.device(GPU_ID if torch.cuda.is_available() else "cpu")
 
-    return train_loader, val_loader
+    print(f'Dataset info:\n Train size: {train_size},\n Test size: {test_size},\n Device: {device}')
+
+    model_ft: nn.Module = models.resnet50(pretrained=True)
+    num_ftrs = model_ft.fc.in_features
+    model_ft.fc = nn.Linear(num_ftrs, 2)
+    #model_ft = model_ft.to(device)
+
+    weights = np.array([1.0, 1.0])
+    cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
+    criterion = nn.CrossEntropyLoss(weight=cl_weights)
+    optimizer_ft = optim.Adam(model_ft.parameters(), lr=0.0001, weight_decay=0.0001)
+    
+    #cyclic_scheduler = lr_scheduler.CyclicLR(optimizer_ft, 0.000001, 0.0001, step_size_up=1000, gamma=0.9, mode='exp_range', cycle_momentum=False)
+    step_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=15, gamma=0.5)
+
+    torch.cuda.empty_cache()
+    model = train_model(model_ft, criterion, optimizer_ft, step_scheduler, [train_loader, val_loader], device, writer)
 
 
-def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50):
+def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=100):
     since = time.time()
     best_acc = 0.0
     model.to(device)
@@ -108,10 +101,12 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
                 cm[int(true), int(pred)] += 1
             #running_f1 += metrics.f1_score(labels.cpu(), preds.cpu()) * inputs.size(0)
 
-        scheduler.step()
+        scheduler.step() # Change depending on scheduling!
+        # print('STEP ', i)
         print(running_loss / len(loaders[0].dataset))
+        print(cm)
+        writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
         if epoch % 10 == 9:
-            print(cm)
             validate(model, criterion, loaders[1], device, writer, epoch)
 
     time_elapsed = time.time() - since
@@ -151,7 +146,6 @@ def validate(model, criterion, loader, device, writer, cur_epoch):
     writer.add_scalar('train/recall', recall, cur_epoch)
     print(cm)
     print(f'Scores:\n F1: {f1},\n Precision: {precision},\n Recall: {recall}')
-
 
 if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')

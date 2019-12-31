@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from torchvision import utils
 from skimage import io
 from skimage import transform as trans
+import utils as utl
 
 
 class RetinaDataset(Dataset):
@@ -27,12 +28,19 @@ class RetinaDataset(Dataset):
     def __len__(self):
         return len(self.labels_df)
 
+    def get_weight(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        severity = self.labels_df.iloc[idx, 1]
+        return 0.3 if severity == 0 else 1.0
+
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
         img_name = os.path.join(self.root_dir, self.labels_df.iloc[idx, 0] + self.file_type)
-        image = cv2.imread(img_name)[:,:,[2, 1, 0]]
+        image = cv2.imread(img_name)
+        image = image[:,:,[2, 1, 0]]
 
         severity = self.labels_df.iloc[idx, 1]
 
@@ -80,6 +88,35 @@ class RandomCrop(object):
         return image
 
 
+class RandomNormalCrop(object):
+    def __init__(self, output_size):
+        assert isinstance(output_size, (int, tuple))
+        if isinstance(output_size, int):
+            self.output_size = (output_size, output_size)
+        else:
+            assert len(output_size) == 2
+            self.output_size = output_size
+
+    def __call__(self, image):
+        h, w, _ = image.shape
+        #image = trans.resize(image, (h, w))
+
+        new_h, new_w = self.output_size
+        mean_h, mean_w = (h - new_h) // 2, (w - new_w) // 2
+        std_h, std_w = mean_h * 0.25, mean_w * 0.25
+
+        top_rand = np.random.normal(mean_h, std_h)
+        top = top_rand if top_rand < h - new_h else h - new_h - 1
+        top = top if top > 0 else 0
+        left_rand = np.random.normal(mean_w, std_w)
+        left = left_rand if left_rand < w - new_w else w - new_w - 1
+        left = left if left > 0 else 0
+        #top = np.random.randint(0, h - new_h)
+        #left = np.random.randint(0, w - new_w)
+        image = image[int(top): int(top) + new_h, int(left): int(left) + new_w]
+        return image
+
+
 class Flip(object):
     def __init__(self, probability):
         assert isinstance(probability, float)
@@ -88,6 +125,28 @@ class Flip(object):
     def __call__(self, image):
         if np.random.rand() < self.prob:
             image = cv2.flip(image, 1)
+        return image
+
+class Blur(object):
+    def __init__(self, probability):
+        assert isinstance(probability, float)
+        self.prob = probability
+
+    def __call__(self, image):
+        if np.random.rand() < self.prob:
+            image = cv2.GaussianBlur(image, (5, 5) ,0)
+        return image
+
+class EnhanceContrast(object):
+    def __init__(self, probability):
+        assert isinstance(probability, float)
+        self.prob = probability
+
+    def __call__(self, image):
+        if np.random.rand() < self.prob:
+            image = image[:, :, [2, 1, 0]]
+            image = utl.enhance_contrast_image(image, clip_limit=np.random.randint(2, 5))
+            image = image[:, :, [2, 1, 0]]
         return image
 
 
@@ -124,3 +183,5 @@ def show_batch(sample_batched):
 
     grid = utils.make_grid(images_batch)
     plt.imshow(grid.numpy().transpose((1, 2, 0)))
+    plt.show()
+
