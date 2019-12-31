@@ -3,7 +3,6 @@ import numpy as np
 import mahotas as mt
 import utils as utl
 from sklearn.base import BaseEstimator, TransformerMixin
-import multiprocessing
 from joblib import Parallel, delayed
 
 
@@ -39,8 +38,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
     @staticmethod
     def transform(self, X, y=None):
-        num_cpus = multiprocessing.cpu_count()
-        X_trans = Parallel(n_jobs=num_cpus)(delayed(self.extract_single_feature_vector)(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X)
+        X_trans = Parallel(n_jobs=-1)(delayed(self.extract_single_feature_vector)(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X)
         # X_trans = [self.extract_single_feature_vector(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X]
         # print(f'FEAT> {np.array(X_trans).shape}')
         return np.array(X_trans)

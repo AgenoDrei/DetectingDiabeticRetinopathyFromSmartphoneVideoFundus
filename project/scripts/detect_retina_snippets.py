@@ -166,7 +166,7 @@ def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10
         frames = [utl.pad_image_to_size(f, (max_height, max_width)) for f in frames]
 
         #out = cv2.VideoWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{i}.a'), cv2.VideoWriter_fourcc('H', '2', '6', '4'), fps, size)
-        out = io.FFmpegWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{conf}.mp4'),
+        out = io.FFmpegWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{start}_{conf}.mp4'),
                               inputdict={'-r': str(fps), '-s': f'{max_width}x{max_height}'},
                               outputdict={'-vcodec': 'libx264', '-crf': '0', '-preset':'slow'})
         for frame in frames:
