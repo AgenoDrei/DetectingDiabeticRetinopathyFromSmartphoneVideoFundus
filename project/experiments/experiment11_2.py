@@ -42,7 +42,7 @@ def run():
     train_dataset, test_dataset = torch.utils.data.random_split(retina_dataset, [train_size, test_size])
 
     sample_weights = [retina_dataset.get_weight(i) for i in train_dataset.indices]
-    sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(sample_weights), replacement=False)
+    sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, sampler=sampler, num_workers=16)
     val_loader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=16)
@@ -51,6 +51,14 @@ def run():
     print(f'Dataset info:\n Train size: {train_size},\n Test size: {test_size},\n Device: {device}')
 
     model_ft: nn.Module = models.resnet50(pretrained=True)
+    
+    layer_idx = 0
+    for child in model_ft.children():
+        layer_idx += 1
+        if layer_idx < 5:
+            for param in child.parameters():
+                param.requires_grad = False
+
     num_ftrs = model_ft.fc.in_features
     model_ft.fc = nn.Linear(num_ftrs, 2)
     #model_ft = model_ft.to(device)
@@ -61,13 +69,13 @@ def run():
     optimizer_ft = optim.Adam(model_ft.parameters(), lr=0.0001, weight_decay=0.0001)
     
     #cyclic_scheduler = lr_scheduler.CyclicLR(optimizer_ft, 0.000001, 0.0001, step_size_up=1000, gamma=0.9, mode='exp_range', cycle_momentum=False)
-    step_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=15, gamma=0.5)
+    step_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=12, gamma=0.5)
 
     torch.cuda.empty_cache()
     model = train_model(model_ft, criterion, optimizer_ft, step_scheduler, [train_loader, val_loader], device, writer)
 
 
-def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=100):
+def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=80):
     since = time.time()
     best_acc = 0.0
     model.to(device)

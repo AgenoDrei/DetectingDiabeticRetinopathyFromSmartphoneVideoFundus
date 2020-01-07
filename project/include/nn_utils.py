@@ -12,7 +12,7 @@ import utils as utl
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', transform=None):
+    def __init__(self, csv_file, root_dir, file_type='.png', transform=None, augmentations=None):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -20,10 +20,12 @@ class RetinaDataset(Dataset):
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
+        assert transform is None or augmentations is None
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.file_type = file_type
         self.transform = transform
+        self.augs = augmentations
 
     def __len__(self):
         return len(self.labels_df)
@@ -39,14 +41,17 @@ class RetinaDataset(Dataset):
             idx = idx.tolist()
 
         img_name = os.path.join(self.root_dir, self.labels_df.iloc[idx, 0] + self.file_type)
-        image = cv2.imread(img_name)
-        image = image[:,:,[2, 1, 0]]
+        img = cv2.imread(img_name)
+        #image = image[:,:,[2, 1, 0]]
 
         severity = self.labels_df.iloc[idx, 1]
 
-        sample = {'image': image, 'label': severity}
+        sample = {'image': img, 'label': severity}
         if self.transform:
+            sample['image'] = img[:, :, [2, 1, 0]]
             sample['image'] = self.transform(sample['image'])
+        if self.augs:
+            sample['image'] = self.augs(image=img)['image']
         return sample
 
 

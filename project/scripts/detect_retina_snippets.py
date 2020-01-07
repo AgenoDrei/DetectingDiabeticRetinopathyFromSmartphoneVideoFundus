@@ -130,7 +130,8 @@ def preprocess_frames(img, out_path, idx):
 
     img = cv2.bitwise_and(img, mask)
     img = utl.crop_to_circle(img, circle)
-    cv2.imwrite(join(out_path, SUBFOLDER_PROCESSED, f'{idx}.jpg'), img)
+    if img is not None and img.size != 0:
+        cv2.imwrite(join(out_path, SUBFOLDER_PROCESSED, f'{idx}.jpg'), img)
     return img
 
 
