@@ -5,6 +5,7 @@ import torch
 from torch import nn, optim
 from torch.utils import data
 from torch.optim import lr_scheduler
+from torchvision import models
 import pretrainedmodels as ptm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -19,14 +20,14 @@ class RetinaSystem(pl.LightningModule):
         super(RetinaSystem, self).__init__()
         self.hparams = hparams
 
-        self.net = ptm.inceptionv4(num_classes=1000, pretrained='imagenet')
+        self.net = models.resnet50(pretrained=True)
         # freeze net
-        for i, child in enumerate(self.net.features.children()):
-            if i > hparams.freeze_factor * len(list(self.net.features.children())):
+        for i, child in enumerate(self.net.children()):
+            if i < hparams.freeze_factor * len(list(self.net.children())):
                 for param in child.parameters():
                     param.require_grad = False
-        num_ftrs = self.net.last_linear.in_features
-        self.net.last_linear = nn.Linear(num_ftrs, 2)
+        num_ftrs = self.net.fc.in_features
+        self.net.fc = nn.Linear(num_ftrs, 2)
 
     def training_step(self, batch, batch_idx):
         inputs = batch['image']
@@ -35,7 +36,7 @@ class RetinaSystem(pl.LightningModule):
         out = self.net.forward(inputs)
         _, preds = torch.max(out, 1)
 
-        loss = nn.functional.cross_entropy(preds, labels)
+        loss = nn.functional.cross_entropy(out, labels)
         logger_logs = {'training_loss': loss}
 
         return {'loss': loss, 'progress_bar': {'training_loss': loss}, 'log': logger_logs}
@@ -47,15 +48,16 @@ class RetinaSystem(pl.LightningModule):
         out = self.net.forward(inputs)
         _, preds = torch.max(out, 1)
 
-        loss = nn.functional.cross_entropy(preds, labels)
+        loss = nn.functional.cross_entropy(out, labels)
         cm = torch.zeros(2, 2)
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-        return OrderedDict({
-            'val_loss': loss,
+        output = OrderedDict({
+            'val_loss': loss.item(),
             'cm': cm
         })
+        return output
 
     def validation_end(self, outputs):
         val_loss_mean = 0
@@ -73,12 +75,13 @@ class RetinaSystem(pl.LightningModule):
         recall = tp / (tp + fn + 0.1)
         f1 = (2 * precision * recall) / (precision + recall + 0.1)
 
-        tqdm_dict = {'val_loss': val_loss_mean.item(), 'val_f1': f1, 'val_precision': precision, 'val_recall': recall}
-        logger_logs = {'val_loss': val_loss_mean.item(), 'val_f1': f1, 'val_precision': precision, 'val_recall': recall}
+        tqdm_dict = {'val_loss': val_loss_mean, 'val_f1': f1, 'val_precision': precision, 'val_recall': recall}
+        logger_logs = {'val_loss': val_loss_mean, 'val_f1': f1, 'val_precision': precision, 'val_recall': recall}
         results = {
             'progress_bar': tqdm_dict,
             'log': logger_logs
         }
+        return results
 
 
     def configure_optimizers(self):
@@ -131,6 +134,7 @@ class RetinaSystem(pl.LightningModule):
         parser.add_argument('--batch_size', default=32, type=int)
         parser.add_argument('--image_size', default=300, type=int)
         parser.add_argument('--crop_size', default=299, type=int)
+        parser.add_argument('--freeze_factor', default=0, type=float)
 
         # training specific (for this model)
         parser.add_argument('--max_nb_epochs', default=2, type=int)
@@ -146,6 +150,7 @@ def main(hparams):
     trainer = Trainer(
         max_nb_epochs=hparams.max_nb_epochs,
         gpus=hparams.gpus,
+        distributed_backend='ddp',
         nb_gpu_nodes=hparams.nodes,
         show_progress_bar=True,
         default_save_path=f'{os.getcwd()}/runs_lightning'
