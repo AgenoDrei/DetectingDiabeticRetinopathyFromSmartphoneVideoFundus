@@ -19,11 +19,11 @@ import pretrainedmodels as ptm
 
 BASE_PATH = '/home/user/mueller9/Data'
 #BASE_PATH = '/data/simon/'
-GPU_ID = 'cuda:5'
-BATCH_SIZE = 16
+GPU_ID = 'cuda:0'
+BATCH_SIZE = 32
 
 def run():
-    writer = SummaryWriter(comment="_exp2_90000_resnet50__672x672_frozen")
+    writer = SummaryWriter(comment="_exp3_90000_inception4_598x598_frozen")
     device = torch.device(GPU_ID if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
@@ -37,36 +37,38 @@ def run():
         'size': 598,
     }
 
-    model = models.resnet50(pretrained=True)
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 2)
+    model = ptm.inceptionv4(pretrained='imagenet')
+    num_ftrs = model.last_linear.in_features
+    model.last_linear = nn.Linear(num_ftrs, 2)
     layer_idx = 0
-    for child in model.children():
+    for child in model.features.children():
         layer_idx += 1
-        if layer_idx < len(list(model.children())) * 0.5:
+        if layer_idx < len(list(model.features.children())) * 0.5:
             for param in child.parameters():
                 param.requires_grad = False
 
     optimizer_ft = optim.Adam(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][0])
-    criterion = nn.CrossEntropyLoss()
-    step_scheduler = lr_scheduler.MultiStepLR(optimizer_ft, milestones=[15, 25, 35, 45], gamma=0.1)
+    weights = np.array([hyperparameter['weights'][5], 1.0])
+    cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
+    criterion = nn.CrossEntropyLoss(weight=cl_weights)
+    step_scheduler = lr_scheduler.MultiStepLR(optimizer_ft, milestones=[10, 20, 30, 37, 44], gamma=0.5)
 
     save_batch(next(iter(loaders[0])), '/tmp')
     model = train_model(model, criterion, optimizer_ft, step_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
 
 def prepare_dataset(base_name: str):
     aug_pipeline_train = A.Compose([
-            A.Resize(900, 900, always_apply=True, p=1.0),
-            A.RandomCrop(672, 672, always_apply=True, p=1.0),
+            A.Resize(600, 600, always_apply=True, p=1.0),
+            A.RandomCrop(299, 299, always_apply=True, p=1.0),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.CoarseDropout(min_holes=1, max_holes=4, max_width=100, max_height=100, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=15, border_mode=cv2.BORDER_REFLECT, p=0.5),
-            #A.IAAPerspective(scale=(0.02, 0.05), p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.1, rotate_limit=15, border_mode=cv2.BORDER_REFLECT, p=0.5),
+            A.IAAPerspective(scale=(0.02, 0.05), p=0.5),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)]),
             RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
             A.RandomGamma(p=0.5),
-            A.CLAHE(clip_limit=(2, 4), p=1.0),
+            A.CLAHE(p=0.5),
             A.Normalize(always_apply=True, p=1.0),
             ToTensorV2(always_apply=True, p=1.0)
             #A.OneOf([RandomBrightnessContrast(), A.RandomGamma(), CLAHE(clip_limit=4), Blur(blur_limit=9)], p=0.5),
@@ -75,9 +77,8 @@ def prepare_dataset(base_name: str):
         ], p=1.0)
 
     aug_pipeline_val = A.Compose([
-        A.Resize(900, 900, always_apply=True, p=1.0),
-        A.CenterCrop(672, 672, always_apply=True, p=1.0),
-        A.CLAHE(clip_limit=(3, 3), p=1.0),
+        A.Resize(600, 600, always_apply=True, p=1.0),
+        A.CenterCrop(299, 299, always_apply=True, p=1.0),
         A.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)

@@ -12,7 +12,7 @@ import utils as utl
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', transform=None, augmentations=None):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -26,6 +26,7 @@ class RetinaDataset(Dataset):
         self.file_type = file_type
         self.transform = transform
         self.augs = augmentations
+        self.ratio = balance_ratio
 
     def __len__(self):
         return len(self.labels_df)
@@ -34,7 +35,7 @@ class RetinaDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         severity = self.labels_df.iloc[idx, 1]
-        return 0.3 if severity == 0 else 1.0
+        return self.ratio if severity == 0 else 1.0
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
@@ -189,4 +190,11 @@ def show_batch(sample_batched):
     grid = utils.make_grid(images_batch)
     plt.imshow(grid.numpy().transpose((1, 2, 0)))
     plt.show()
+
+
+def save_batch(batch, path):
+    images_batch, label_batch = batch['image'], batch['label']
+    for i, img in enumerate(images_batch):
+        cv2.imwrite(os.path.join(path, f'{i}_{label_batch[i]}.png'), img.numpy().transpose((1, 2, 0)))
+
 
