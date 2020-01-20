@@ -36,7 +36,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
 
-    @staticmethod
     def transform(self, X, y=None):
         X_trans = Parallel(n_jobs=-1)(delayed(self.extract_single_feature_vector)(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X)
         # X_trans = [self.extract_single_feature_vector(x, self.haralick_dist, self.hist_size, self.clip_limit) for x in X]

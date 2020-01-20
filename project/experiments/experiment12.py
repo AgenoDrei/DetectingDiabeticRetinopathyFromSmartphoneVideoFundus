@@ -22,8 +22,9 @@ class RetinaSystem(pl.LightningModule):
 
         self.net = models.resnet50(pretrained=True)
         # freeze net
-        for i, child in enumerate(self.net.children()):
-            if i < hparams.freeze_factor * len(list(self.net.children())):
+        children = self.net.children()
+        for i, child in enumerate(children):
+            if i < hparams.freeze_factor * len(list(children)):
                 for param in child.parameters():
                     param.require_grad = False
         num_ftrs = self.net.fc.in_features
@@ -37,9 +38,9 @@ class RetinaSystem(pl.LightningModule):
         _, preds = torch.max(out, 1)
 
         loss = nn.functional.cross_entropy(out, labels)
-        logger_logs = {'training_loss': loss}
+        logger_logs = {'training/loss': loss}
 
-        return {'loss': loss, 'progress_bar': {'training_loss': loss}, 'log': logger_logs}
+        return {'loss': loss, 'progress_bar': {'training/loss': loss}, 'log': logger_logs}
 
     def validation_step(self, batch, batch_idx):
         inputs = batch['image']
@@ -75,8 +76,8 @@ class RetinaSystem(pl.LightningModule):
         recall = tp / (tp + fn + 0.1)
         f1 = (2 * precision * recall) / (precision + recall + 0.1)
 
-        tqdm_dict = {'val_loss': val_loss_mean, 'val_f1': f1, 'val_precision': precision, 'val_recall': recall}
-        logger_logs = {'val_loss': val_loss_mean, 'val_f1': f1, 'val_precision': precision, 'val_recall': recall}
+        tqdm_dict = {'val/loss': val_loss_mean, 'val/f1': f1, 'val/precision': precision, 'val/recall': recall}
+        logger_logs = {'val/loss': val_loss_mean, 'val/f1': f1, 'val/precision': precision, 'val/recall': recall}
         results = {
             'progress_bar': tqdm_dict,
             'log': logger_logs

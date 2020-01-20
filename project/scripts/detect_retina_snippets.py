@@ -39,7 +39,7 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
     pipeline = job.load(model_path)
     extractor = ft.FeatureExtractor(haralick_dist=4, clip_limit=4.0, hist_size=[8, 3, 3])
 
-    extract_frames(input_path, output_path, frames_per_second=fps)
+    utl.extract_video_frames(input_path, join(output_path, SUBFOLDER_FRAMES), frames_per_second=fps)
 
     X_test = np.empty((0, 156), dtype=np.float)
     file_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key=lambda f: int(os.path.splitext(f)[0]))
@@ -91,39 +91,11 @@ def init(output_path):
     os.mkdir(join(output_path, SUBFOLDER_RESULTS))
 
 
-@tw.profile
-def extract_frames(image_path: str, output_path: str, frames_per_second: int = 10) -> None:
-    assert os.path.exists(image_path)
-    time_between_frames = 1000 / frames_per_second
-    frames = []
-    count = 0
-
-    vidcap = cv2.VideoCapture(image_path)
-    fps = vidcap.get(cv2.CAP_PROP_FPS)
-    frame_count = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
-    prev = -1
-    _, image = vidcap.read()
-    print(f'SNIP> Extracting {frame_count // fps * frames_per_second} frames from {image_path}')
-    while count <= 5000:                                    # Max video size
-        grabbed = vidcap.grab()
-        if grabbed:
-            time_s = vidcap.get(cv2.CAP_PROP_POS_MSEC) // time_between_frames
-            if time_s > prev:
-                cv2.imwrite(join(output_path, SUBFOLDER_FRAMES, f'{count}.jpg'), vidcap.retrieve()[1])
-                count += 1
-                #frames.append(vidcap.retrieve()[1])
-            prev = time_s
-        else:
-            break
-    #job.Parallel(n_jobs=-1)(job.delayed(cv2.imwrite)(join(output_path, SUBFOLDER_FRAMES, f'{i}.jpg'), frame) for i, frame in
-    #                        enumerate(frames[:len(frames)//FRAMES_PER_SNIPPET * FRAMES_PER_SNIPPET]))
-
-
 def preprocess_frames(img, out_path, idx):
     if (type(img) != np.ndarray and type(img) != np.memmap) or img is None:
         return None
 
-    img_enh = utl.enhance_contrast_image(img, clip_limit=4, tile_size=12)
+    img_enh = utl.enhance_contrast_image(img, clip_limit=3.5, tile_size=12)
     mask, circle = utl.get_retina_mask(img_enh)
     if circle[2] == 0:
         return None

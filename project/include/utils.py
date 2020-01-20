@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import time_wrap as tw
 
 ####################################
 ######### HELPER METHODS ###########
@@ -172,3 +173,29 @@ def plot_historgram_one_channel(img: np.array) -> None:
     plt.xlim([0, 255])
     plt.ylim(0, max(hist))
     plt.show()
+
+########################## Video functions ###############################
+
+@tw.profile
+def extract_video_frames(image_path: str, output_path: str, frames_per_second: int = 10) -> None:
+    assert os.path.exists(image_path)
+    time_between_frames = 1000 / frames_per_second
+    count = 0
+
+    vidcap = cv2.VideoCapture(image_path)
+    fps = vidcap.get(cv2.CAP_PROP_FPS)
+    frame_count = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
+    prev = -1
+    _, image = vidcap.read()
+    print(f'SNIP> Extracting {frame_count // fps * frames_per_second} frames from {image_path}')
+    while count <= 5000:                                    # Max video size
+        grabbed = vidcap.grab()
+        if grabbed:
+            time_s = vidcap.get(cv2.CAP_PROP_POS_MSEC) // time_between_frames
+            if time_s > prev:
+                cv2.imwrite(os.path.join(output_path, f'{count}.jpg'), vidcap.retrieve()[1])
+                count += 1
+                #frames.append(vidcap.retrieve()[1])
+            prev = time_s
+        else:
+            break

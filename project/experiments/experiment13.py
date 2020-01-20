@@ -20,7 +20,7 @@ import pretrainedmodels as ptm
 
 BASE_PATH = '/home/simon/infcuda2/Data'
 GPU_ID = 'cuda'
-BATCH_SIZE = 2
+BATCH_SIZE = 1
 
 def run():
     device = torch.device(GPU_ID if torch.cuda.is_available() else "cpu")
@@ -32,21 +32,25 @@ def run():
         'num_epochs': 70,                                   # 100
         'weights': [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],          # 0.6
         'optimizer': [optim.Adam, optim.SGD],               # Adam
-        'image_size': 500,
-        'crop_size': 448
+        'image_size': 300,
+        'crop_size': 299
     }
     loaders = prepare_dataset('retina', hyperparameter)
 
-    model: nn.Module = models.resnet50(pretrained=True)
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 2)
+    #model: nn.Module = models.resnet50(pretrained=True)
+    #num_ftrs = model.fc.in_features
+    #model.fc = nn.Linear(num_ftrs, 2)
+    model = ptm.inceptionv4(num_classes=1000, pretrained='imagenet')
+    num_ft = model.last_linear.in_features
+    model.last_linear = nn.Linear(num_ft, 2)
 
-    for i, child in enumerate(model.children()):
-        if i < 0.2 * len(list(model.children())):
+    children = model.features.children()
+    for i, child in enumerate(children):
+        if i < 0.0 * len(list(children)):
             for param in child.parameters():
                 param.require_grad = False
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-9, weight_decay=0)
+    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-7, weight_decay=0)
     criterion = nn.CrossEntropyLoss()
 
     lr_finder = LRFinder(model, optimizer_ft, criterion, device=device)

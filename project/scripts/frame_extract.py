@@ -2,15 +2,13 @@ import os
 import argparse
 import cv2
 from joblib import Parallel, delayed
-import multiprocessing
 
 
 def run(image_path, output_path, time_between_frames):
     paths = [f for f in os.listdir(image_path)]
     print(f'EXTRACT> Found {len(paths)} videos in folder {image_path}: {paths}')
 
-    num_cpus = multiprocessing.cpu_count()
-    results = Parallel(n_jobs=num_cpus)(delayed(extract_images)(os.path.join(image_path, p), output_path, p, time_between_frames=1000 // time_between_frames) for p in paths)
+    results = Parallel(n_jobs=-1)(delayed(extract_images)(os.path.join(image_path, p), output_path, p, time_between_frames=1000 // time_between_frames) for p in paths)
     return output_path
 
 
@@ -45,17 +43,6 @@ if __name__== '__main__':
     print('EXTRACT> ', args)
 
     run(args.input, args.output, args.fps)
-
-    # paths = [f for f in os.listdir(args.input)]
-    # print(f'UTIL> Found {len(paths)} videos in folder {args.input}: {paths}')
-    #
-    # num_cpus = multiprocessing.cpu_count()
-    # results = Parallel(n_jobs=num_cpus)(delayed(extract_images)(os.path.join(args.input, p), args.output, p, time_between_frames=1000//args.fps) for p in paths)  # n_jobs = number of processes
-
-
-    #for p in paths:
-    #    video_path = os.path.join(args.input, p)
-    #    extract_images(video_path, args.output, p)
 
 
 

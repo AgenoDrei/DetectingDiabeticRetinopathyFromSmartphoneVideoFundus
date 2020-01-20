@@ -9,6 +9,15 @@ WORKING_PATH = '/tmp/dr'
 RESULTS_PATH = os.path.join(WORKING_PATH, 'results')
 
 def run(input, output, pipeline, fps, majority):
+    """
+    Convert retionpathy videos to usable snippets (2 secs, 20 frames) with <majority> percent of usable frames
+    :param input: Absolute path to video folder, all files with .MOV ending will be recursively processed together
+    :param output: Absolute path to output folder
+    :param pipeline: Absolute path to pretrained SVM pipeline with scaling / preprocessing
+    :param fps: Extracted frames per video
+    :param majority: Percentage of usable frames, everything above this threshold will be saved to a new snippet
+    :return:
+    """
     name_pattern = re.compile(r"([A-Z])(\d){3}[RL](\d)?")
     if not os.path.exists(output):
         os.mkdir(output)

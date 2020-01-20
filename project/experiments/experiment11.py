@@ -1,26 +1,25 @@
 import os
 import sys
 import time
-
 import albumentations as A
 import cv2
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_utils import RetinaDataset, save_batch
+from nn_utils import RetinaDataset
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import models
 import pretrainedmodels as ptm
 
+
 BASE_PATH = '/home/user/mueller9/Data'
 #BASE_PATH = '/home/simon/infcuda2/Data'
-GPU_ID = 'cuda'
-BATCH_SIZE = 32
+GPU_ID = 'cuda:0'
+BATCH_SIZE = 16
 
 def run():
     device = torch.device(GPU_ID if torch.cuda.is_available() else "cpu")
@@ -28,46 +27,40 @@ def run():
 
     hyperparameter = {
         'learning_rate': [1e-2, 1e-3, 3e-4, 1e-4, 3e-5],    # 1e-4
-        'weight_decay': [0, 1e-3, 5e-4, 1e-4],              # 1e-4
-        'num_epochs': 70,                                   # 100
+        'weight_decay': [0, 1e-3, 3e-4, 1e-4],              # 1e-4
+        'num_epochs': 60,                                   # 100
         'weights': [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],          # 0.6
         'optimizer': [optim.Adam, optim.SGD],               # Adam
-        'image_size': 500,
-        'crop_size': 448
+        'image_size': 600,
+        'crop_size': 500
     }
     loaders = prepare_dataset('retina', hyperparameter)
 
-    #model = ptm.inceptionv4(num_classes=1000, pretrained='imagenet')
-    #num_ft = model.last_linear.in_features
-    #model.last_linear = nn.Linear(num_ft, 2)
+    #model: nn.Module = models.resnet50(pretrained=True)
+    model = ptm.inceptionv4()
+    num_ftrs = model.last_linear.in_features
+    model.last_linear = nn.Linear(num_ftrs, 2)
 
-    model: nn.Module = models.resnet50(pretrained=True)
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 2)
+    optimizer_ft = optim.AdamW(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
+    criterion = nn.CrossEntropyLoss()
+    plateu_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
 
-    optimizer_ft = optim.Adam(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
-    weights = np.array([hyperparameter['weights'][5], 1.0])
-    cl_weights = torch.from_numpy(weights).to(device, dtype=torch.float)
-    criterion = nn.CrossEntropyLoss(weight=cl_weights)
-    #step_scheduler = lr_scheduler.MultiStepLR(optimizer_ft, milestones=[10, 20, 30, 37, 44], gamma=0.5)
-    plateu_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.5, patience=5, verbose=True)
-
-    writer = SummaryWriter(comment=f"_exp1_processed90000_{model.__class__.__name__}_{hyperparameter['crop_size']}^2_")
+    writer = SummaryWriter(comment=f"_exp1_processed90000_{model.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}")
     #save_batch(next(iter(loaders[0])), '/tmp')
     model = train_model(model, criterion, optimizer_ft, plateu_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
+
 
 def prepare_dataset(base_name: str, hp):
     aug_pipeline_train = A.Compose([
             A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
             A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-            #A.RandomSizedCrop((299, 450), 299, 299, p=1.0),
             A.HorizontalFlip(p=0.5),
-            #A.VerticalFlip(p=0.5),
-            #A.CoarseDropout(min_holes=1, max_holes=4, max_width=100, max_height=100, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.0, rotate_limit=25, border_mode=cv2.BORDER_REFLECT, p=0.5),
-            #A.IAAPerspective(scale=(0.02, 0.05), p=0.3),
+            A.CoarseDropout(min_holes=1, max_holes=4, max_width=100, max_height=100, min_width=25, min_height=25, p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=15, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
+            A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.5),
+            A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.5),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.5),
-            A.OneOf([RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2), A.RandomGamma()], p=0.5),
+            A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.5),
             A.Normalize(always_apply=True, p=1.0),
             ToTensorV2(always_apply=True, p=1.0)
         ], p=1.0)
@@ -92,7 +85,6 @@ def prepare_dataset(base_name: str, hp):
 
 def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50):
     since = time.time()
-    best_acc = 0.0
     model.to(device)
 
     for epoch in range(num_epochs):
@@ -113,8 +105,6 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
             _, preds = torch.max(outputs, 1)
 
             loss = criterion(outputs, labels)
-            #loss2 = criterion(aux_outputs, labels)
-            #loss = loss1 + 0.4 * loss2
             loss.backward()
             optimizer.step()
 
@@ -132,9 +122,6 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-    #print(f'Best val Acc: {best_acc:4f}')
-
-    validate(model, criterion, loaders[1], device, writer, num_epochs)
 
     torch.save(model.state_dict(), os.path.join(BASE_PATH, f'model{time.time()}.dat'))
     return model
