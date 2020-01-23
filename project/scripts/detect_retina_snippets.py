@@ -42,7 +42,7 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
     utl.extract_video_frames(input_path, join(output_path, SUBFOLDER_FRAMES), frames_per_second=fps)
 
     X_test = np.empty((0, 156), dtype=np.float)
-    file_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key=lambda f: int(os.path.splitext(f)[0]))
+    file_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key=lambda f: int(os.path.splitext(f)[0].split('_')[1]))
     for i in trange(0, len(file_paths), BATCH_SIZE):
         start = time.monotonic()
         # print(f'VPRO> Start: {start:.2f}')

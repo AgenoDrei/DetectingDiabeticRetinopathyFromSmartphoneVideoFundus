@@ -186,16 +186,15 @@ def extract_video_frames(image_path: str, output_path: str, frames_per_second: i
     fps = vidcap.get(cv2.CAP_PROP_FPS)
     frame_count = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
     prev = -1
-    _, image = vidcap.read()
     print(f'SNIP> Extracting {frame_count // fps * frames_per_second} frames from {image_path}')
     while count <= 5000:                                    # Max video size
         grabbed = vidcap.grab()
         if grabbed:
             time_s = vidcap.get(cv2.CAP_PROP_POS_MSEC) // time_between_frames
             if time_s > prev:
-                cv2.imwrite(os.path.join(output_path, f'{count}.jpg'), vidcap.retrieve()[1])
+                cv2.imwrite(os.path.join(output_path, f'{os.path.splitext(os.path.basename(image_path))[0]}_{int(time_s):02d}.png'), vidcap.retrieve()[1])
                 count += 1
                 #frames.append(vidcap.retrieve()[1])
-            prev = time_s
+                prev = time_s
         else:
             break
