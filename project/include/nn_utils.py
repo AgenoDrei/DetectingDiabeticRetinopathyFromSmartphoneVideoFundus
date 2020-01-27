@@ -4,6 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import cv2
 import os
+
+from torch import nn
 from torch.utils.data import Dataset
 from torchvision import utils
 from skimage import io
@@ -54,6 +56,72 @@ class RetinaDataset(Dataset):
         if self.augs:
             sample['image'] = self.augs(image=img)['image']
         return sample
+
+
+class SnippetDataset(Dataset):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None):
+        assert transform is None or augmentations is None
+        self.labels_df = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.file_type = file_type
+        self.augs = augmentations
+        self.ratio = balance_ratio
+
+    def __len__(self):
+        return len(self.labels_df)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        severity = self.labels_df.iloc[idx, 1]
+        prefix = 'pos' if severity == 1 else 'neg'
+
+        video_name = self.labels_df.iloc[idx, 0]         #TODO: Remove unecassary conversion
+        video_index = int(video_name[-2:])
+        video_name = video_name[:-2]
+        frame_index = set([int(f.split('_')[1]) for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_name in f])
+        frame_index = sorted(list(frame_index))
+        frame_names = sorted([f for f in os.listdir(os.path.join(self.root_dir, prefix)) if f'{video_name}_{frame_index[video_index]}' in f], key=lambda n: int(n.split('_')[3][:2]))
+
+        sample = {'frames': [], 'label': severity}
+        for name in frame_names:
+            img = cv2.imread(os.path.join(self.root_dir, prefix, name))
+            img =  self.augs(image=img)['image'] if self.augs else img
+            sample['frames'].append(img)
+
+        sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
+        return sample
+
+    def get_weight(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        severity = self.labels_df.iloc[idx, 1]
+        return self.ratio if severity == 0 else 1.0
+
+
+class RetinaNet(nn.Module):
+    def __init__(self, frame_stump):
+        super(RetinaNet, self).__init__()
+        self.num_frames = 20
+        self.out_stump = self.stump.last_linear.in_features
+        self.stump = frame_stump
+        self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
+
+        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, 256), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(256, 2))
+        #self.fc1 = nn.Linear(self.out_stump, 256)
+        #self.fc2 = nn.Linear(256, 2)
+        #self.softmax = nn.Softmax()
+
+    def forward(self, x):
+        features = []
+        for idx in range(0, len(x.size(1))):                        # Iterate over time dimension
+            out = self.stump.features(x[:, idx, :, :, :])           # Shove batch trough stump
+            out = out.view(out.size(0), -1)                         # Flatten results for fc
+            features.append(out)                                    # Size: (B, c*h*w)
+        out = torch.cat(features, dim=1)
+        out = self.temporal_pooling(out)
+        out = self.after_pooling(out)
+        return out
 
 
 class CenterCrop(object):
@@ -133,6 +201,7 @@ class Flip(object):
             image = cv2.flip(image, 1)
         return image
 
+
 class Blur(object):
     def __init__(self, probability):
         assert isinstance(probability, float)
@@ -142,6 +211,7 @@ class Blur(object):
         if np.random.rand() < self.prob:
             image = cv2.GaussianBlur(image, (5, 5) ,0)
         return image
+
 
 class EnhanceContrast(object):
     def __init__(self, probability):
@@ -198,3 +268,20 @@ def save_batch(batch, path):
         cv2.imwrite(os.path.join(path, f'{i}_{label_batch[i]}.png'), img.numpy().transpose((1, 2, 0)))
 
 
+def dfs_freeze(model):
+    for name, child in model.named_children():
+        for param in child.parameters():
+            param.requires_grad = False
+        dfs_freeze(child)
+
+
+def calc_scores_from_confusion_matrix(cm):
+    tp = cm[1, 1].item()
+    fp = cm[0, 1].item()
+    fn = cm[1, 0].item()
+
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    f1 = (2 * tp) / (2 * tp + fp + fn)
+
+    return {'precision': precision, 'recall': recall, 'f1': f1}

@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+from os.path import join
+
 import albumentations as A
 import cv2
 import torch
@@ -8,46 +10,58 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_utils import RetinaDataset
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import models
 import pretrainedmodels as ptm
+import argparse
 
 
-BASE_PATH = '/home/user/mueller9/Data'
-#BASE_PATH = '/home/simon/infcuda2/Data'
-GPU_ID = 'cuda:2'
-BATCH_SIZE = 100
-
-def run():
-    device = torch.device(GPU_ID if torch.cuda.is_available() else "cpu")
+def run(base_path, model_path, gpu_name, batch_size, num_epochs):
+    device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
     hyperparameter = {
         'learning_rate': [1e-2, 1e-3, 3e-4, 1e-4, 3e-5],    # 1e-4
         'weight_decay': [0, 1e-3, 3e-4, 1e-4],              # 1e-4
-        'num_epochs': 60,                                   # 100
+        'num_epochs': num_epochs,
+        'batch_size': batch_size,
         'weights': [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],          # 0.6
         'optimizer': [optim.Adam, optim.SGD],               # Adam
         'image_size': 320,
         'crop_size': 299
     }
-    loaders = prepare_dataset('retina', hyperparameter)
+    print(f'Hyperparameter info:\n {str(hyperparameter)}')
+    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
 
     #model: nn.Module = models.resnet50(pretrained=True)
-    model = ptm.inceptionv4()
-    num_ftrs = model.last_linear.in_features
-    model.last_linear = nn.Linear(num_ftrs, 2)
+    #TODO: Redo whole model for videos
+    model = prepare_model(model_path)
 
-    optimizer_ft = optim.AdamW(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
+    optimizer_ft = optim.Adam(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
     criterion = nn.CrossEntropyLoss()
     plateu_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
 
     writer = SummaryWriter(comment=f"_exp1_processed90000_{model.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}")
     #save_batch(next(iter(loaders[0])), '/tmp')
     model = train_model(model, criterion, optimizer_ft, plateu_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
+
+
+def prepare_model(model_path):
+    stump:ptm.inceptionv4 = ptm.inceptionv4()
+    num_ftrs = stump.last_linear.in_features
+    stump.last_linear = nn.Linear(num_ftrs, 2)
+    stump.load_state_dict(torch.load(model_path))
+
+    for child in stump.children():
+        for param in child.parameters():
+            param.requires_grad = False
+        dfs_freeze(child)
+
+    net = RetinaNet(stump)
+    return net
 
 
 def prepare_dataset(base_name: str, hp):
@@ -72,13 +86,13 @@ def prepare_dataset(base_name: str, hp):
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
 
-    train_dataset = RetinaDataset(os.path.join(BASE_PATH, f'{base_name}_labels_train.csv'), os.path.join(BASE_PATH, f'{base_name}_processed_data_train'), augmentations=aug_pipeline_train, file_type='.jpg', balance_ratio=0.25)
-    val_dataset = RetinaDataset(os.path.join(BASE_PATH, f'{base_name}_labels_val.csv'), os.path.join(BASE_PATH, f'{base_name}_processed_data_val'), augmentations=aug_pipeline_val, file_type='.jpg')
+    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, 'train'), augmentations=aug_pipeline_train)
+    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, 'val'), augmentations=aug_pipeline_val)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, sampler=sampler, num_workers=16)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=16)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=16)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=16)
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
 
@@ -122,8 +136,6 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-
-    torch.save(model.state_dict(), os.path.join(BASE_PATH, f'model{time.time()}.dat'))
     return model
 
 
@@ -166,5 +178,13 @@ if __name__ == '__main__':
     print(f'INFO> Using opencv version {cv2.__version__}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
-    run()
+    parser = argparse.ArgumentParser(description='Train your eyes out')
+    parser.add_argument('--data', help='Path for training data', type=str)
+    parser.add_argument('--model', help='Path for the base model', type=str)
+    parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')
+    parser.add_argument('--bs', help='Batch size for training', type=int, default=8)
+    parser.add_argument('--epochs', help='Number of training epochs', type=int, default=50)
+    args = parser.parse_args()
+
+    run(args.data, args.model, args.gpu, args.bs, args.epochs)
     sys.exit(0)

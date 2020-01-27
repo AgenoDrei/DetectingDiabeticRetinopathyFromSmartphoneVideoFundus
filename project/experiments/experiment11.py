@@ -18,7 +18,7 @@ import pretrainedmodels as ptm
 
 BASE_PATH = '/home/user/mueller9/Data'
 #BASE_PATH = '/home/simon/infcuda2/Data'
-GPU_ID = 'cuda:2'
+GPU_ID = 'cuda:0'
 BATCH_SIZE = 100
 
 def run():
@@ -41,13 +41,14 @@ def run():
     num_ftrs = model.last_linear.in_features
     model.last_linear = nn.Linear(num_ftrs, 2)
 
-    optimizer_ft = optim.AdamW(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
+    optimizer_ft = optim.Adam(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
     criterion = nn.CrossEntropyLoss()
     plateu_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
 
-    writer = SummaryWriter(comment=f"_exp1_processed90000_{model.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}")
+    description = f"_exp1_processed90000_{model.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}"
+    writer = SummaryWriter(comment=description)
     #save_batch(next(iter(loaders[0])), '/tmp')
-    model = train_model(model, criterion, optimizer_ft, plateu_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
+    model = train_model(model, criterion, optimizer_ft, plateu_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], desc=description)
 
 
 def prepare_dataset(base_name: str, hp):
@@ -55,12 +56,12 @@ def prepare_dataset(base_name: str, hp):
             A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
             A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
             A.HorizontalFlip(p=0.5),
-            A.CoarseDropout(min_holes=1, max_holes=4, max_width=100, max_height=100, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=90, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
+            A.CoarseDropout(min_holes=1, max_holes=3, max_width=100, max_height=100, min_width=25, min_height=25, p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
             A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
             A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
-            A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
+            A.OneOf([RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2), A.RandomGamma()], p=0.3),
             A.Normalize(always_apply=True, p=1.0),
             ToTensorV2(always_apply=True, p=1.0)
         ], p=1.0)
@@ -83,9 +84,10 @@ def prepare_dataset(base_name: str, hp):
     return train_loader, val_loader
 
 
-def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50):
+def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50, desc=None):
     since = time.time()
     model.to(device)
+    max_f1 = -1
 
     for epoch in range(num_epochs):
         print(f'{time.strftime("%H:%M:%S")}> Epoch {epoch}/{num_epochs}')
@@ -116,18 +118,23 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         print(cm)
         writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
-        val_loss = validate(model, criterion, loaders[1], device, writer, epoch)
+        val_loss, f1 = validate(model, criterion, loaders[1], device, writer, epoch)
+
+        if f1 > max_f1:
+            max_f1 = f1
+            torch.save(model.state_dict(), os.path.join(BASE_PATH, f'model_best{desc}'))
+
         scheduler.step(val_loss)
 
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
 
-    torch.save(model.state_dict(), os.path.join(BASE_PATH, f'model{time.time()}.dat'))
+    torch.save(model.state_dict(), os.path.join(BASE_PATH, f'model_{time.localtime()}{desc}'))
     return model
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch) -> float:
+def validate(model, criterion, loader, device, writer, cur_epoch) -> (float, float):
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
@@ -158,7 +165,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> float:
     writer.add_scalar('test/loss', running_loss / len(loader.dataset), cur_epoch)
     print(cm)
     print(f'Scores:\n F1: {f1},\n Precision: {precision},\n Recall: {recall}')
-    return running_loss / len(loader.dataset)
+    return running_loss / len(loader.dataset), f1
 
 
 if __name__ == '__main__':

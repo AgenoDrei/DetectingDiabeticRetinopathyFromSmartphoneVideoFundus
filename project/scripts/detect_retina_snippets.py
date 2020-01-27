@@ -25,7 +25,7 @@ BATCH_SIZE = 120
 
 
 @tw.profile
-def run(input_path: str, output_path: str, model_path: str, fps: int = 10, majority: float = 0.65) -> None:
+def run(input_path: str, output_path: str, model_path: str, fps: int = 10, majority: float = 0.65, only_frames: bool = False) -> None:
     """
     :param input_path: path to input video
     :param output_path: path to folder for temporary and result files, will overwrite exiting folder
@@ -70,7 +70,7 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
     print(f'VPRO> SVM found {len(snippet_idxs)} retina snippets')
     print(f'VPRO> Writing frames to {join(output_path, SUBFOLDER_RESULTS)}')
 
-    write_snippets_to_disk(snippet_idxs, output_path, name=os.path.splitext(os.path.basename(input_path))[0], fps=fps)
+    write_snippets_to_disk(snippet_idxs, output_path, name=os.path.splitext(os.path.basename(input_path))[0], fps=fps, only_frames=only_frames)
 
 
 def process_batch_frame(idx: int, file_paths: str, output_path: str, extractor: ft.FeatureExtractor):
@@ -129,7 +129,8 @@ def majority_vote(y_pred, majority: float = 0.65) -> list:
 
 
 @tw.profile
-def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10):
+def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10, only_frames: bool = False):
+    idx = 0
     for start, end, conf in idxs:
         frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_PROCESSED, f'{j}.jpg')) for j in range(start, end))
         frames = [np.zeros((850, 850, 3), dtype=np.uint8) if f is None or f.size == 0 else f for f in frames]
@@ -139,12 +140,18 @@ def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10
         frames = [utl.pad_image_to_size(f, (max_height, max_width)) for f in frames]
 
         #out = cv2.VideoWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{i}.a'), cv2.VideoWriter_fourcc('H', '2', '6', '4'), fps, size)
-        out = io.FFmpegWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{start}_{conf}.mp4'),
+        if not only_frames:
+            out = io.FFmpegWriter(join(output_path, SUBFOLDER_RESULTS, f'{name}_{idx}_{conf}.mp4'),
                               inputdict={'-r': str(fps), '-s': f'{max_width}x{max_height}'},
                               outputdict={'-vcodec': 'libx264', '-crf': '0', '-preset':'slow'})
-        for frame in frames:
-            out.writeFrame(frame[:,:,[2, 1, 0]])
-        out.close()
+            for frame in frames:
+                out.writeFrame(frame[:,:,[2, 1, 0]])
+            out.close()
+        else:
+            for i, frame in enumerate(frames):
+                cv2.imwrite(join(output_path, SUBFOLDER_RESULTS, f'{name}_{idx}_{conf}_{i}.png'), frame)
+
+        idx += 1
 
     #[cv2.imwrite(join(output_path, SUBFOLDER_RESULTS, f'{i}.jpg'), frame) for i, frame in enumerate(snippets)]
 
@@ -157,7 +164,8 @@ if __name__== '__main__':
     a.add_argument("--pipeline", help="path to SVM pretrained model")
     a.add_argument("--fps", help="Number of frames extracted per second", default=10, type=int)
     a.add_argument("--majority", help="Percentage of frames that have to register as retina", default=0.6, type=float)
+    a.add_argument("--only_frames", help="Create video or just frames", default=False, type=bool)
     args = a.parse_args()
     print('VPRO> ', args)
 
-    run(args.input, args.output, args.pipeline, fps=args.fps, majority=args.majority)
+    run(args.input, args.output, args.pipeline, fps=args.fps, majority=args.majority, only_frames=args.only_frames)
