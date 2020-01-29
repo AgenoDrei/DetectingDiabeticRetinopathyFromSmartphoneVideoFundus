@@ -33,7 +33,7 @@ def run():
         'optimizer': [optim.Adam, optim.SGD],               # Adam
         'image_size': 320,
         'crop_size': 299,
-        'freeze': 0.7
+        'freeze': 0.0
     }
     loaders = prepare_dataset('retina', hyperparameter)
 

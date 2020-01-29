@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from os.path import join
+from typing import Tuple
 
 import albumentations as A
 import cv2
@@ -10,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -18,49 +19,56 @@ from torchvision import models
 import pretrainedmodels as ptm
 import argparse
 
+from tqdm import tqdm
+
 
 def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
     hyperparameter = {
-        'learning_rate': [1e-2, 1e-3, 3e-4, 1e-4, 3e-5],    # 1e-4
-        'weight_decay': [0, 1e-3, 3e-4, 1e-4],              # 1e-4
+        'learning_rate': 1e-4,
+        'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'weights': [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],          # 0.6
-        'optimizer': [optim.Adam, optim.SGD],               # Adam
+        'optimizer': optim.Adam,
         'image_size': 320,
-        'crop_size': 299
+        'crop_size': 299,
+        'freeze': 0.0,
+        'stump_pooling': False,
+        'balance': 0.5
     }
-    print(f'Hyperparameter info:\n {str(hyperparameter)}')
+    hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
+    print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
 
-    #model: nn.Module = models.resnet50(pretrained=True)
-    #TODO: Redo whole model for videos
-    model = prepare_model(model_path)
+    net:RetinaNet = prepare_model(model_path, hyperparameter)
 
-    optimizer_ft = optim.Adam(model.parameters(), lr=hyperparameter['learning_rate'][3], weight_decay=hyperparameter['weight_decay'][3])
+    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
-    plateu_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
+    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
 
-    writer = SummaryWriter(comment=f"_exp1_processed90000_{model.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}")
-    #save_batch(next(iter(loaders[0])), '/tmp')
-    model = train_model(model, criterion, optimizer_ft, plateu_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
+    writer = SummaryWriter(comment=f"video_allsnippets_{net.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}")
+    model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
 
 
-def prepare_model(model_path):
+def prepare_model(model_path, hp):
     stump:ptm.inceptionv4 = ptm.inceptionv4()
+
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
     stump.load_state_dict(torch.load(model_path))
+    stump.train()
 
-    for child in stump.children():
-        for param in child.parameters():
-            param.requires_grad = False
-        dfs_freeze(child)
+    print('Loaded stump: ', len(stump.features))
 
-    net = RetinaNet(stump)
+    for i, child in enumerate(stump.features.children()):
+        if i < len(stump.features) * hp['freeze']:
+            for param in child.parameters():
+                param.requires_grad = False
+            dfs_freeze(child)
+
+    net = RetinaNet(frame_stump=stump, do_avg_pooling=hp['stump_pooling'])
     return net
 
 
@@ -86,13 +94,13 @@ def prepare_dataset(base_name: str, hp):
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
 
-    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, 'train'), augmentations=aug_pipeline_train)
+    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, 'train'), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
     val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, 'val'), augmentations=aug_pipeline_val)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=16)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=16)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=hp['batch_size'])
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=hp['batch_size'])
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
 
@@ -109,14 +117,14 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         cm = torch.zeros(2, 2)
 
         # Iterate over data.
-        for i, batch in enumerate(loaders[0]):
-            inputs = batch['image'].to(device, dtype=torch.float)
+        for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
+            inputs = batch['frames'].to(device, dtype=torch.float)
             labels = batch['label'].to(device)
             
             model.train()
             optimizer.zero_grad()
             outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
+            _, pred = torch.max(outputs, 1)
 
             loss = criterion(outputs, labels)
             loss.backward()
@@ -124,28 +132,31 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            for true, pred in zip(labels, preds):
+            for true, pred in zip(labels, pred):
                 cm[int(true), int(pred)] += 1
-            #running_f1 += metrics.f1_score(labels.cpu(), preds.cpu()) * inputs.size(0)
 
-        print(cm)
+        train_scores = calc_scores_from_confusion_matrix(cm)
+        print(f'Training scores:\n F1: {train_scores["f1"]},\n Precision: {train_scores["precision"]},\n Recall: {train_scores["recall"]}')
+        writer.add_scalar('train/f1', train_scores['f1'], epoch)
         writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
-        val_loss = validate(model, criterion, loaders[1], device, writer, epoch)
-        scheduler.step(val_loss)
+        val_loss, _ = validate(model, criterion, loaders[1], device, writer, epoch)
 
+        scheduler.step(val_loss)
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
+
+    torch.save(model.state_dict(), f'model_{time.strftime("%Y%m%d_%H%M")}')
     return model
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch) -> float:
+def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float, float]:
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
 
     for i, batch in enumerate(loader):
-        inputs = batch['image'].to(device, dtype=torch.float)
+        inputs = batch['frames'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         with torch.no_grad():
             outputs = model(inputs)
@@ -156,21 +167,14 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> float:
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-    tp = cm[1, 1].item()
-    fp = cm[0, 1].item()
-    fn = cm[1, 0].item()
-
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    f1 = (2 * tp) / (2 * tp + fp + fn)
-
-    writer.add_scalar('test/f1', f1, cur_epoch)
-    writer.add_scalar('test/precision', precision, cur_epoch)
-    writer.add_scalar('test/recall', recall, cur_epoch)
+    scores = calc_scores_from_confusion_matrix(cm)
+    writer.add_scalar('test/f1', scores['f1'], cur_epoch)
+    writer.add_scalar('test/precision', scores['precision'], cur_epoch)
+    writer.add_scalar('test/recall', scores['recall'], cur_epoch)
     writer.add_scalar('test/loss', running_loss / len(loader.dataset), cur_epoch)
-    print(cm)
-    print(f'Scores:\n F1: {f1},\n Precision: {precision},\n Recall: {recall}')
-    return running_loss / len(loader.dataset)
+    print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+
+    return running_loss / len(loader.dataset), scores['f1']
 
 
 if __name__ == '__main__':
