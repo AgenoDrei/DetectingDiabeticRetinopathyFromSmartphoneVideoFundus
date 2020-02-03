@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import models
 import pretrainedmodels as ptm
 import argparse
-
+from sklearn.metrics import f1_score, recall_score, precision_score
 from tqdm import tqdm
 
 
@@ -31,12 +31,14 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'optimizer': optim.Adam,
+        'optimizer': optim.Adam.__class__.__name__,
         'image_size': 320,
         'crop_size': 299,
         'freeze': 0.0,
-        'stump_pooling': False,
-        'balance': 0.5
+        'stump_pooling': True,
+        'balance': 0.4,
+        'pretraining': False,
+        'preprocessing': False
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
@@ -48,8 +50,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
 
-    writer = SummaryWriter(comment=f"video_allsnippets_{net.__class__.__name__}_{hyperparameter['crop_size']}^2_{optimizer_ft.__class__.__name__}")
-    model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'])
+    desc = f'_video_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
+    writer = SummaryWriter(comment=desc)
+    model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
 def prepare_model(model_path, hp):
@@ -57,7 +60,8 @@ def prepare_model(model_path, hp):
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
-    stump.load_state_dict(torch.load(model_path))
+    if hp['pretraining']:
+        stump.load_state_dict(torch.load(model_path))
     stump.train()
 
     print('Loaded stump: ', len(stump.features))
@@ -94,8 +98,9 @@ def prepare_dataset(base_name: str, hp):
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
 
-    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, 'train'), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
-    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, 'val'), augmentations=aug_pipeline_val)
+    set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
+    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
+    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -105,8 +110,9 @@ def prepare_dataset(base_name: str, hp):
     return train_loader, val_loader
 
 
-def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50):
+def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50, description='Vanilla'):
     since = time.time()
+    best_f1_val = -1
     model.to(device)
 
     for epoch in range(num_epochs):
@@ -139,14 +145,16 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         print(f'Training scores:\n F1: {train_scores["f1"]},\n Precision: {train_scores["precision"]},\n Recall: {train_scores["recall"]}')
         writer.add_scalar('train/f1', train_scores['f1'], epoch)
         writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
-        val_loss, _ = validate(model, criterion, loaders[1], device, writer, epoch)
+        val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
+
+        best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
 
         scheduler.step(val_loss)
 
     time_elapsed = time.time() - since
-    print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
+    print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
-    torch.save(model.state_dict(), f'model_{time.strftime("%Y%m%d_%H%M")}')
+    torch.save(model.state_dict(), f'model{description}')
     return model
 
 
@@ -154,10 +162,13 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
+    majority_dict = {}
 
     for i, batch in enumerate(loader):
         inputs = batch['frames'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
+        video_name = batch['name']
+
         with torch.no_grad():
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -167,12 +178,30 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
+        for i, (true, pred) in enumerate(zip(labels, preds)):
+            if majority_dict.get(video_name):
+                entry = majority_dict[video_name]
+                entry['pos' if pred else 'neg'] += 1
+                entry['count'] += 1
+            else:
+                majority_dict[video_name] = {'pos': 1 if pred else 0, 'neg': 1 if not pred else 0, 'count': 1, 'label': true}
+
     scores = calc_scores_from_confusion_matrix(cm)
-    writer.add_scalar('test/f1', scores['f1'], cur_epoch)
-    writer.add_scalar('test/precision', scores['precision'], cur_epoch)
-    writer.add_scalar('test/recall', scores['recall'], cur_epoch)
-    writer.add_scalar('test/loss', running_loss / len(loader.dataset), cur_epoch)
+    writer.add_scalar('val/f1', scores['f1'], cur_epoch)
+    writer.add_scalar('val/precision', scores['precision'], cur_epoch)
+    writer.add_scalar('val/recall', scores['recall'], cur_epoch)
+    writer.add_scalar('val/loss', running_loss / len(loader.dataset), cur_epoch)
     print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+
+    labels, preds = [], []
+    for i, item in majority_dict.items():
+        if item['pos'] >= item['neg']:
+            preds.append(1)
+        else:
+            preds.append(0)
+        labels.append(item['label'])
+    f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
+    print(f'Validation scores (eye level):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
 
     return running_loss / len(loader.dataset), scores['f1']
 

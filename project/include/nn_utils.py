@@ -91,7 +91,7 @@ class SnippetDataset(Dataset):
 
         #print(len(frame_names), f'{video_name}_{frame_index[video_index]}')
 
-        sample = {'frames': [], 'label': severity}
+        sample = {'frames': [], 'label': severity, 'name': video_name}
         for name in frame_names:
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
             img =  self.augs(image=img)['image'] if self.augs else img
@@ -291,6 +291,9 @@ def calc_scores_from_confusion_matrix(cm):
     tp = cm[1, 1].item()
     fp = cm[0, 1].item()
     fn = cm[1, 0].item()
+
+    if tp + fp == 0:
+        return {'precision': 0, 'recall': 0, 'f1': 0}
 
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)

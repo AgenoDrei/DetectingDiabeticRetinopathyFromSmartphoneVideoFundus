@@ -8,7 +8,7 @@ import os
 WORKING_PATH = '/tmp/dr'
 RESULTS_PATH = os.path.join(WORKING_PATH, 'results')
 
-def run(input, output, pipeline, fps, majority):
+def run(input, output, pipeline, fps, majority, only_frames=False):
     """
     Convert retionpathy videos to usable snippets (2 secs, 20 frames) with <majority> percent of usable frames
     :param input: Absolute path to video folder, all files with .MOV ending will be recursively processed together
@@ -29,7 +29,7 @@ def run(input, output, pipeline, fps, majority):
             continue
 
         print(f'EXT> Working on file {filename} now!')
-        drs.run(str(filename), Path(WORKING_PATH), pipeline, fps, majority)
+        drs.run(str(filename), Path(WORKING_PATH), pipeline, fps, majority, only_frames=only_frames)
 
         result_files = os.listdir(RESULTS_PATH)
         for file in result_files:
@@ -51,7 +51,9 @@ if __name__== '__main__':
     a.add_argument("--pipeline", help="path to SVM pretrained model")
     a.add_argument("--fps", help="Number of frames extracted per second", default=10, type=int)
     a.add_argument("--majority", help="Percentage of frames that have to register as retina", default=0.65, type=float)
+    a.add_argument("--only_frames", help="Create video or just frames", default=False, type=bool)
+
     args = a.parse_args()
     print('EXT> ', args)
 
-    run(args.input, args.output, args.pipeline, fps=args.fps, majority=args.majority)
+    run(args.input, args.output, args.pipeline, fps=args.fps, majority=args.majority, only_frames=args.only_frames)

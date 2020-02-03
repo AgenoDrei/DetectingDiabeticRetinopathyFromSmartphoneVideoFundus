@@ -9,28 +9,27 @@ import re
 from pathlib import Path
 from shutil import copy
 from sklearn.utils import shuffle
+from sklearn.model_selection import StratifiedShuffleSplit
 from tqdm import tqdm
 
 
 def run(input_path, labels_path, val_size):
     df = pd.read_csv(labels_path)
-    df = shuffle(df)
-    
     df['image'] = df.image.astype(str)
-    #print(df.level.value_counts())
     df_val = pd.DataFrame(columns=df.columns)
     df_train = pd.DataFrame(columns=df.columns)
-    df.reset_index(inplace=True, drop=True)
-    
-    for i, row in tqdm(df.iterrows(), total=len(df)):
-        if i < val_size * len(df):
-            df_val = df_val.append(row.to_dict(), ignore_index = True)
-            copy_files(row['image'], input_path, row['level'], 'val')            
-            continue
-        else:
-            df_train = df_train.append(row.to_dict(), ignore_index=True)
-            copy_files(row['image'], input_path, row['level'], 'train')
-            continue
+    #print(df.level.value_counts())
+
+    X, y = df['image'], df['level']
+    splitter = StratifiedShuffleSplit(n_splits=1, test_size=val_size)
+    split = next(splitter.split(X, y))
+
+    for idx in split[0]: #idx of train set
+        df_train = df_train.append(df.iloc[idx].to_dict(), ignore_index=True)
+        copy_files(df.iloc[idx, 0], input_path, df.iloc[idx, 1], 'train')
+    for idx in split[1]: #idx of validation set
+        df_val = df_val.append(df.iloc[idx].to_dict(), ignore_index=True)
+        copy_files(df.iloc[idx, 0], input_path,df.iloc[idx, 1], 'val')
             
     df_val.to_csv(join(input_path, 'labels_val.csv'), index=False)
     df_train.to_csv(join(input_path, 'labels_train.csv'), index=False)
