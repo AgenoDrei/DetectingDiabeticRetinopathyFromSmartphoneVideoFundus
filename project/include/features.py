@@ -26,12 +26,13 @@ def extract_feature_vector(X: np.array, bin_size: int = 16, haralick_dist: int =
 
 
 class FeatureExtractor(BaseEstimator, TransformerMixin):
-    def __init__(self, haralick_dist: int = 4, hist_size=None, clip_limit=4.0):
+    def __init__(self, haralick_dist: int = 4, hist_size=None, clip_limit=4.0, only_histogram=False):
         if hist_size is None:
             hist_size = [8, 3, 3]
         self.haralick_dist = haralick_dist
         self.hist_size = hist_size
         self.clip_limit = clip_limit
+        self.only_histogram = only_histogram
 
     def fit(self, X, y=None):
         return self
@@ -43,14 +44,15 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return np.array(X_trans)
 
     def extract_single_feature_vector(self, x, distance, size, limit):
-        channels = cv2.split(cv2.cvtColor(x, cv2.COLOR_BGR2LAB))
         features = []
-        for c in channels:  # haarlick features
-            try:
-                texture_feat: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=distance, return_mean_ptp=True)
-            except ValueError:
-                texture_feat = np.zeros(28, dtype=np.float32)
-            features.append(texture_feat)
+        if not self.only_histogram:
+            channels = cv2.split(cv2.cvtColor(x, cv2.COLOR_BGR2LAB))
+            for c in channels:  # haarlick features
+                try:
+                    texture_feat: np.array = mt.features.haralick(c, compute_14th_feature=True, distance=distance, return_mean_ptp=True)
+                except ValueError:
+                    texture_feat = np.zeros(28, dtype=np.float32)
+                features.append(texture_feat)
 
         img = utl.enhance_contrast_image(x, clip_limit=limit, tile_size=12)
         hist = cv2.calcHist([cv2.cvtColor(img, cv2.COLOR_BGR2HSV)], [0, 1, 2], None, size, [0, 180, 0, 256, 0, 256])  # Histogram features

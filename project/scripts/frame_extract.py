@@ -38,7 +38,7 @@ if __name__== '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("--input", help="path to video")
     a.add_argument("--output", help="path to images")
-    a.add_argument("--fps", help="how many frames are extracted per second", type=int, edefault=1)
+    a.add_argument("--fps", help="how many frames are extracted per second", type=int, default=1)
     args = a.parse_args()
     print('EXTRACT> ', args)
 

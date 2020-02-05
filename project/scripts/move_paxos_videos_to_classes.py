@@ -10,7 +10,7 @@ from pathlib import Path
 from shutil import copy
 
 
-def run(input_path, output_path, labels_path):
+def run(input_path, output_path, labels_path, ignore_files=False):
     """
     Split paxos dataset into positive/negative videos and create simpler CSV file usable for training
     :param input_path: Absolute path to paxos adapter video files
@@ -28,15 +28,16 @@ def run(input_path, output_path, labels_path):
 
     for i, row in df.iterrows():
         if isinstance(row['Paxos_DR'], str) or isinstance(row['Paxos_sharpness'], str) or row['Paxos_sharpness'] < 3:
+            print('Skipping row: ', row['Eye_ID'], row['Paxos_sharpness'], row['Paxos_DR'])
             continue
         if row['Paxos_DR'] <= 1 or row['Paxos_DR'] == 9:
             processed_df = processed_df.append({'image': row.Eye_ID, 'level': 0}, ignore_index=True)
-            move_corresponding_files(row.Eye_ID, filtered_files, output_path, "neg")
-        elif 2 <= row['Paxos_DR'] <= 4:
-            processed_df = processed_df.append({'image': row.Eye_ID, 'level': 1}, ignore_index=True)
-            move_corresponding_files(row.Eye_ID, filtered_files, output_path, "pos")
+            if not ignore_files: move_corresponding_files(row.Eye_ID, filtered_files, output_path, "neg")
+        elif row['Paxos_DR'] > 1 and row['Paxos_DR'] < 5:
+            processed_df = processed_df.append({'image': row.Eye_ID, 'level': row['Paxos_DR']}, ignore_index=True)
+            if not ignore_files: move_corresponding_files(row.Eye_ID, filtered_files, output_path, "pos")
 
-    processed_df.to_csv(join(output_path, 'processed_labels_paxos.csv'))
+    processed_df.to_csv(join(output_path, 'processed_labels_paxos.csv'), index=False)
 
 
 def move_corresponding_files(id, filtered_files, path, class_id):
@@ -53,19 +54,22 @@ if __name__ == '__main__':
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--labels", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")
+    a.add_argument("--ignore_files", help="Do not move video files, just recreate csv", default=False, type=bool)
     args = a.parse_args()
+    print(args)
 
     assert os.path.exists(args.input)
-    if os.path.exists(args.output):
+    if os.path.exists(args.output) and not args.ignore_files:
         os.rmdir(join(args.output, 'pos'))
         os.rmdir(join(args.output, 'neg'))
         os.rmdir(args.output)
 
-    os.mkdir(args.output)
-    os.mkdir(join(args.output, 'pos'))
-    os.mkdir(join(args.output, 'neg'))
+    if not args.ignore_files:
+        os.mkdir(args.output)
+        os.mkdir(join(args.output, 'pos'))
+        os.mkdir(join(args.output, 'neg'))
 
-    run(args.input, args.output, args.labels)
+    run(args.input, args.output, args.labels, ignore_files=args.ignore_files)
 
 
 

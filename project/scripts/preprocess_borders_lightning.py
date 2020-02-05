@@ -28,12 +28,13 @@ def crop_image_from_gray(img, tol=7):
         return img
 
 
-def preprocess(img_path, input_path, output_path, sigma=10):
+def preprocess(img_path, input_path, output_path, light=False, sigma=10):
     image = cv2.imread(join(input_path, img_path))
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     # Ben Grahams method to improve lighning
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = cv2.addWeighted(image, 4, cv2.GaussianBlur(image, (0, 0), sigma), -4, 128)
+    if light:
+        image = cv2.addWeighted(image, 4, cv2.GaussianBlur(image, (0, 0), sigma), -4, 128)
 
     # Circle crop
     height, width, depth = image.shape
@@ -57,13 +58,14 @@ if __name__ == '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")
+    a.add_argument("--improve_light", help="apply ben graham light improvements", default=False, type=bool)
     args = a.parse_args()
 
     assert os.path.exists(args.input)
     if os.path.exists(args.output):
         os.rmdir(args.output)
     os.mkdir(args.output)
-    j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output) for f in os.listdir(args.input))
+    j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, light=args.improve_light) for f in os.listdir(args.input))
 
 
 

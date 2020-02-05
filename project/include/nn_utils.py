@@ -76,22 +76,17 @@ class SnippetDataset(Dataset):
         severity = self.labels_df.iloc[idx, 1]
         prefix = 'pos' if severity == 1 else 'neg'
 
-        video_name = self.labels_df.iloc[idx, 0]         #TODO: Remove unecassary conversion
-        video_index = int(video_name.split('_')[1])
-        video_name = video_name.split('_')[0]
-        files = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_name == f.split('_')[0]]
+        video_name = self.labels_df.iloc[idx, 0]
+        video_desc = get_video_desc(video_name)
 
-        frame_index = set([int(f.split('_')[1]) for f in files])
-        frame_index = sorted(list(frame_index))
+        files = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_desc['eye_id'] == get_video_desc(f)['eye_id']]
+        #if len(frame_index) - 1 < video_index:
+        #    print('Problem with video ', video_name, video_index)
 
-        if len(frame_index) - 1 < video_index:
-            print('Problem with video ', video_name, video_index)
+        frame_names = sorted([f for f in files if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
+        #print(len(frame_names))
 
-        frame_names = sorted([f for f in files if int(frame_index[video_index]) == int(f.split('_')[1])], key=lambda n: int(n.split('_')[3][:2]))
-
-        #print(len(frame_names), f'{video_name}_{frame_index[video_index]}')
-
-        sample = {'frames': [], 'label': severity, 'name': video_name}
+        sample = {'frames': [], 'label': severity, 'name': video_desc['eye_id'][:5]}
         for name in frame_names:
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
             img =  self.augs(image=img)['image'] if self.augs else img
@@ -279,6 +274,16 @@ def save_batch(batch, path):
     for i, img in enumerate(images_batch):
         cv2.imwrite(os.path.join(path, f'{i}_{label_batch[i]}.png'), img.numpy().transpose((1, 2, 0)))
 
+
+def get_video_desc(video_path):
+    video_name = os.path.basename(video_path)
+    video_name = os.path.splitext(video_name)[0]
+    info_parts = video_name.split("_")
+
+    if len(info_parts) == 2:
+        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
+    else:
+        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3])}
 
 def dfs_freeze(model):
     for name, child in model.named_children():
