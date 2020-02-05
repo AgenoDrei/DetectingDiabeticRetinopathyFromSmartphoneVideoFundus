@@ -14,7 +14,7 @@ import utils as utl
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -29,6 +29,7 @@ class RetinaDataset(Dataset):
         self.transform = transform
         self.augs = augmentations
         self.ratio = balance_ratio
+        self.use_prefix = use_prefix
 
     def __len__(self):
         return len(self.labels_df)
@@ -43,11 +44,16 @@ class RetinaDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        img_name = os.path.join(self.root_dir, self.labels_df.iloc[idx, 0] + self.file_type)
+        severity = self.labels_df.iloc[idx, 1]
+
+        if self.use_prefix:
+            prefix = 'pos' if severity == 1 else 'neg'
+        else:
+            prefix = ''
+        img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
         img = cv2.imread(img_name)
         #image = image[:,:,[2, 1, 0]]
 
-        severity = self.labels_df.iloc[idx, 1]
 
         sample = {'image': img, 'label': severity}
         if self.transform:
@@ -108,12 +114,13 @@ class RetinaNet(nn.Module):
         self.stump = frame_stump
         self.pool_stump = do_avg_pooling
         self.num_frames = 20
-        self.out_stump = self.stump.last_linear.in_features if self.pool_stump else 98304
+        self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (98304, 1024)
+        self.out_stump = self.pool_params[0]
 
         self.avg_pooling = self.stump.avg_pool
         self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
 
-        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, 256), nn.ReLU(), nn.Dropout(p=0.4), nn.Linear(256, 2))
+        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.4), nn.Linear(self.pool_params[1], 2))
         #self.fc1 = nn.Linear(self.out_stump, 256)
         #self.fc2 = nn.Linear(256, 2)
         #self.softmax = nn.Softmax()
