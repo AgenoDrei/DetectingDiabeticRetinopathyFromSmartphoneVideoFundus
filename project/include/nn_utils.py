@@ -120,7 +120,7 @@ class RetinaNet(nn.Module):
         self.avg_pooling = self.stump.avg_pool
         self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
 
-        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.4), nn.Linear(self.pool_params[1], 2))
+        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
         #self.fc1 = nn.Linear(self.out_stump, 256)
         #self.fc2 = nn.Linear(256, 2)
         #self.softmax = nn.Softmax()
@@ -290,7 +290,7 @@ def get_video_desc(video_path):
     if len(info_parts) == 2:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
     else:
-        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3])}
+        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}
 
 def dfs_freeze(model):
     for name, child in model.named_children():
