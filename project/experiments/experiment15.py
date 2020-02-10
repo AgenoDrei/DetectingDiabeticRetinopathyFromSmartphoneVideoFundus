@@ -32,19 +32,18 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__class__.__name__,
-        'image_size': 320,
+        'image_size': 400,
         'crop_size': 299,
-        'freeze': 0.0,
-        'stump_pooling': True,
+        'freeze': 0.5,
         'balance': 0.5,
-        'pretraining': False,
+        'pretraining': True,
         'preprocessing': False
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
 
-    net:ptm.inceptionv4 = prepare_model(model_path, hyperparameter)
+    net = prepare_model(model_path, hyperparameter)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
@@ -56,7 +55,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
 
 def prepare_model(model_path, hp):
-    stump:ptm.inceptionv4 = ptm.inceptionv4()
+    #stump = models.alexnet(pretrained=True)
+    stump = ptm.inceptionv4()
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
@@ -78,8 +78,8 @@ def prepare_dataset(base_name: str, hp):
             A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
             A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
             A.HorizontalFlip(p=0.5),
-            A.CoarseDropout(min_holes=1, max_holes=4, max_width=100, max_height=100, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=90, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
+            A.CoarseDropout(min_holes=1, max_holes=4, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
             A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
             A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
@@ -96,8 +96,8 @@ def prepare_dataset(base_name: str, hp):
     ], p=1.0)
 
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='')
-    val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, file_type='')
+    train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='', use_prefix=True)
+    val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, file_type='', use_prefix=True)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -161,7 +161,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     running_loss = 0.0
 
     for i, batch in enumerate(loader):
-        inputs = batch['frames'].to(device, dtype=torch.float)
+        inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
 
         with torch.no_grad():

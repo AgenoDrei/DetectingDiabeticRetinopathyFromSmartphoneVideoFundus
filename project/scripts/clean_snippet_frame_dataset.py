@@ -12,16 +12,18 @@ def run(labels_path, min_conf=80):
         video_path = row['image']
         video_desc = get_video_desc(video_path)
 
-        if video_desc['confidence'] < min_conf:
+        if int(video_desc['confidence']) < min_conf:
             drop_list.append(i)
+    print(f'Dropping {len(drop_list)} rows')
     df.drop(df.index[drop_list], inplace=True)
+    df.to_csv(labels_path, index=False)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     a = argparse.ArgumentParser()
     a.add_argument("--labels", help="absolute path to input folder")
-    a.add_argument("--min_quality", help="minimal svm confidence for snippet frames")
+    a.add_argument("--min_quality", help="minimal svm confidence for snippet frames", default=80, type=float)
     args = a.parse_args()
     print(args)
 
