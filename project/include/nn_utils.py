@@ -54,12 +54,62 @@ class RetinaDataset(Dataset):
         img = cv2.imread(img_name)
         #image = image[:,:,[2, 1, 0]]
 
-
         sample = {'image': img, 'label': severity}
         if self.transform:
             sample['image'] = img[:, :, [2, 1, 0]]
             sample['image'] = self.transform(sample['image'])
         if self.augs:
+            sample['image'] = self.augs(image=img)['image']
+        return sample
+
+
+class FiveCropRetinaDataset(Dataset):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, size=299, augmentations=None, use_prefix=False):
+        """
+        Args:
+            csv_file (string): Path to the csv file with annotations.
+            root_dir (string): Directory with all the images.
+            transform (callable, optional): Optional transform to be applied
+                on a sample.
+        """
+        self.labels_df = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.file_type = file_type
+        self.augs = augmentations
+        self.ratio = balance_ratio
+        self.use_prefix = use_prefix
+        self.num_crops = 5
+        self.size = size
+
+    def __len__(self):
+        return len(self.labels_df) * self.num_crops
+
+    def get_weight(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        severity = self.labels_df.iloc[idx, 1]
+        return self.ratio if severity == 0 else 1.0
+
+    def __getitem__(self, idx):
+        assert not torch.is_tensor(idx)
+
+        image_idx = idx // self.num_crops
+        crop_idx = idx % self.num_crops
+
+        severity = self.labels_df.iloc[image_idx, 1]
+
+        if self.use_prefix:
+            prefix = 'pos' if severity == 1 else 'neg'
+        else:
+            prefix = ''
+
+        img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[image_idx, 0] + self.file_type)
+        img = cv2.imread(img_name)
+        #image = image[:,:,[2, 1, 0]]
+
+        sample = {'image': img, 'label': severity, 'image_idx': image_idx}
+        if self.augs:
+            img = utl.do_five_crop(img, self.size, self.size, crop_idx)
             sample['image'] = self.augs(image=img)['image']
         return sample
 
@@ -120,7 +170,7 @@ class RetinaNet(nn.Module):
         self.avg_pooling = self.stump.avg_pool
         self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
 
-        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
+        self.after_pooling = nn.Sequential(nn.Dropout(p=0.5), nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
         #self.fc1 = nn.Linear(self.out_stump, 256)
         #self.fc2 = nn.Linear(256, 2)
         #self.softmax = nn.Softmax()
@@ -136,117 +186,6 @@ class RetinaNet(nn.Module):
         out = self.temporal_pooling(out.unsqueeze(dim=1))
         out = self.after_pooling(out.view(out.size(0), -1))
         return out
-
-
-class CenterCrop(object):
-    def __init__(self, output_size):
-        assert isinstance(output_size, (int, tuple))
-        if isinstance(output_size, int):
-            self.output_size = (output_size, output_size)
-        else:
-            assert len(output_size) == 2
-            self.output_size = output_size
-
-    def __call__(self, image):
-        h, w = image.shape[:2]
-        new_h, new_w = self.output_size
-        top = (h - new_h) // 2
-        left = (w - new_w) // 2
-        image = image[top: top + new_h, left: left + new_w]
-        return image
-
-
-class RandomCrop(object):
-    def __init__(self, output_size):
-        assert isinstance(output_size, (int, tuple))
-        if isinstance(output_size, int):
-            self.output_size = (output_size, output_size)
-        else:
-            assert len(output_size) == 2
-            self.output_size = output_size
-
-    def __call__(self, image):
-        h, w, _ = image.shape
-        #image = trans.resize(image, (h, w))
-
-        new_h, new_w = self.output_size
-        top = np.random.randint(0, h - new_h)
-        left = np.random.randint(0, w - new_w)
-        image = image[top: top + new_h, left: left + new_w]
-        return image
-
-
-class RandomNormalCrop(object):
-    def __init__(self, output_size):
-        assert isinstance(output_size, (int, tuple))
-        if isinstance(output_size, int):
-            self.output_size = (output_size, output_size)
-        else:
-            assert len(output_size) == 2
-            self.output_size = output_size
-
-    def __call__(self, image):
-        h, w, _ = image.shape
-        #image = trans.resize(image, (h, w))
-
-        new_h, new_w = self.output_size
-        mean_h, mean_w = (h - new_h) // 2, (w - new_w) // 2
-        std_h, std_w = mean_h * 0.25, mean_w * 0.25
-
-        top_rand = np.random.normal(mean_h, std_h)
-        top = top_rand if top_rand < h - new_h else h - new_h - 1
-        top = top if top > 0 else 0
-        left_rand = np.random.normal(mean_w, std_w)
-        left = left_rand if left_rand < w - new_w else w - new_w - 1
-        left = left if left > 0 else 0
-        #top = np.random.randint(0, h - new_h)
-        #left = np.random.randint(0, w - new_w)
-        image = image[int(top): int(top) + new_h, int(left): int(left) + new_w]
-        return image
-
-
-class Flip(object):
-    def __init__(self, probability):
-        assert isinstance(probability, float)
-        self.prob = probability
-
-    def __call__(self, image):
-        if np.random.rand() < self.prob:
-            image = cv2.flip(image, 1)
-        return image
-
-
-class Blur(object):
-    def __init__(self, probability):
-        assert isinstance(probability, float)
-        self.prob = probability
-
-    def __call__(self, image):
-        if np.random.rand() < self.prob:
-            image = cv2.GaussianBlur(image, (5, 5) ,0)
-        return image
-
-
-class EnhanceContrast(object):
-    def __init__(self, probability):
-        assert isinstance(probability, float)
-        self.prob = probability
-
-    def __call__(self, image):
-        if np.random.rand() < self.prob:
-            image = image[:, :, [2, 1, 0]]
-            image = utl.enhance_contrast_image(image, clip_limit=np.random.randint(2, 5))
-            image = image[:, :, [2, 1, 0]]
-        return image
-
-
-class ToTensor(object):
-    def __call__(self, image):
-        # swap color axis because, DOES NOT NORMALIZE RIGHT NOW!
-        # numpy image: H x W x C
-        # torch image: C X H X W
-        image = image.transpose((2, 0, 1))
-        return torch.from_numpy(image)
 
 
 def display_examples(ds):
@@ -291,6 +230,7 @@ def get_video_desc(video_path):
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
     else:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}
+
 
 def dfs_freeze(model):
     for name, child in model.named_children():
