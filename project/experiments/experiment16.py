@@ -11,8 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_processing import RandomFiveCrop
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, FiveCropRetinaDataset
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -23,7 +22,7 @@ from sklearn.metrics import f1_score, recall_score, precision_score
 from tqdm import tqdm
 
 
-def run(base_path, model_path, gpu_name, batch_size, num_epochs):
+def run(base_path, gpu_name, batch_size, num_epochs):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
@@ -32,57 +31,50 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'optimizer': optim.Adam.__name__,
+        'optimizer': optim.Adam.__class__.__name__,
         'image_size': 600,
         'crop_size': 299,
         'freeze': 0.0,
-        'stump_pooling': False,
+        'stump_pooling': True,
         'balance': 0.5,
-        'pretraining': True,
         'preprocessing': False
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
 
-    net:RetinaNet = prepare_model(model_path, hyperparameter)
+    net:ptm.inceptionv4 = prepare_model(hyperparameter)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
-    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
+    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=7, verbose=True)
 
-    desc = f'_video_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
+    desc = f'_pretraining_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
-    model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
+    train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
 def prepare_model(model_path, hp):
-    stump:ptm.inceptionv4 = ptm.inceptionv4()
+    net:ptm.inceptionv4 = ptm.inceptionv4()
 
-    num_ftrs = stump.last_linear.in_features
-    stump.last_linear = nn.Linear(num_ftrs, 2)
-    if hp['pretraining']:
-        stump.load_state_dict(torch.load(model_path))
-        print('Loaded stump: ', len(stump.features))
-    stump.train()
+    num_ftrs = net.last_linear.in_features
+    net.last_linear = nn.Linear(num_ftrs, 2)
+    net.train()
 
-    for i, child in enumerate(stump.features.children()):
-        if i < len(stump.features) * hp['freeze']:
+    for i, child in enumerate(net.features.children()):
+        if i < len(net.features) * hp['freeze']:
             for param in child.parameters():
                 param.requires_grad = False
             dfs_freeze(child)
-
-    net = RetinaNet(frame_stump=stump, do_avg_pooling=hp['stump_pooling'])
+    print(f'Model info: {net.__class__.__name__}, layer: {len(net.features)}, #frozen layer: {len(net.features) * hp["freeze"]}')
     return net
 
 
 def prepare_dataset(base_name: str, hp):
     aug_pipeline_train = A.Compose([
-            A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-            RandomFiveCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
+            A.Resize(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0), # switch crop / image size for 5 crop aggregation
             A.HorizontalFlip(p=0.5),
-            A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=20, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
             A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
             A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
@@ -92,15 +84,14 @@ def prepare_dataset(base_name: str, hp):
         ], p=1.0)
 
     aug_pipeline_val = A.Compose([
-        A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-        A.CenterCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
+        A.Resize(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
         A.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
 
-    set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
-    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val)
+    set_names = ('retina_data_train', 'retina_data_val') if not hp['preprocessing'] else ('retina_processed_data_train', 'retina_processed_data_val')
+    train_dataset = FiveCropRetinaDataset(join(base_name, 'retina_labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
+    val_dataset = FiveCropRetinaDataset(join(base_name, 'retina_labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, file_type='.jpg')
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -124,7 +115,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         # Iterate over data.
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
-            inputs = batch['frames'].to(device, dtype=torch.float)
+            inputs = batch['image'].to(device, dtype=torch.float)
             labels = batch['label'].to(device)
             
             model.train()
@@ -167,7 +158,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     for i, batch in enumerate(loader):
         inputs = batch['frames'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
-        video_name = batch['name']
+        crop_idx = batch['image_idx']
 
         with torch.no_grad():
             outputs = model(inputs)
@@ -179,12 +170,12 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
             cm[true, pred] += 1
 
         for i, (true, pred) in enumerate(zip(labels, preds)):
-            if majority_dict.get(video_name[i]):
-                entry = majority_dict[video_name[i]]
-                entry['pos' if int(pred) else 'neg'] += 1
+            if majority_dict.get(crop_idx[i]):
+                entry = majority_dict[crop_idx[i]]
+                entry[str(pred)] += 1
                 entry['count'] += 1
             else:
-                majority_dict[video_name[i]] = {'pos': 1 if int(pred) else 0, 'neg': 1 if not int(pred) else 0, 'count': 1, 'label': int(true)}
+                majority_dict[crop_idx[i]] = {'0': 1 if int(pred) else 0, '1': 1 if not int(pred) else 0, 'count': 1, 'label': int(true)}
 
     scores = calc_scores_from_confusion_matrix(cm)
     writer.add_scalar('val/f1', scores['f1'], cur_epoch)
@@ -195,16 +186,16 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
 
     labels, preds = [], []
     for i, item in majority_dict.items():
-        if item['pos'] >= item['neg']:
-            preds.append(1)
-        else:
+        if item['0'] > item['1']:
             preds.append(0)
+        else:
+            preds.append(1)
         labels.append(item['label'])
 
-    #print(majority_dict)
+    # print(majority_dict)
     print(labels, preds)
     f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
-    print(f'Validation scores (eye level):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
+    print(f'Validation scores (all 5 crops):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
 
     return running_loss / len(loader.dataset), scores['f1']
 
@@ -214,13 +205,12 @@ if __name__ == '__main__':
     print(f'INFO> Using opencv version {cv2.__version__}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
-    parser = argparse.ArgumentParser(description='Train your eyes out')
+    parser = argparse.ArgumentParser(description='Pretraing but with crops (glutenfree)')
     parser.add_argument('--data', help='Path for training data', type=str)
-    parser.add_argument('--model', help='Path for the base model', type=str)
     parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')
     parser.add_argument('--bs', help='Batch size for training', type=int, default=8)
     parser.add_argument('--epochs', help='Number of training epochs', type=int, default=50)
     args = parser.parse_args()
 
-    run(args.data, args.model, args.gpu, args.bs, args.epochs)
+    run(args.data, args.gpu, args.bs, args.epochs)
     sys.exit(0)

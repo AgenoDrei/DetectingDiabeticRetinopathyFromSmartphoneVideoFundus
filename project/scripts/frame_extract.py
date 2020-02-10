@@ -16,7 +16,7 @@ def extract_images(image_path, output_path, name, time_between_frames=1000):
     assert os.path.exists(image_path)
     print(f'EXTRACT> Extracting frames from {image_path}')
     count = 0
-    vidcap = cv2.VideoCapture(image_path)
+    vidcap = cv2.VideoCapture(str(image_path))
     fps = vidcap.get(cv2.CAP_PROP_FPS)
     frame_count = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
     success, image = vidcap.read()

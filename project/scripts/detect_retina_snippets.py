@@ -82,6 +82,7 @@ def process_batch_frame(idx: int, file_paths: str, output_path: str, extractor: 
 
     return feature_vec
 
+
 def init(output_path):
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
@@ -105,14 +106,6 @@ def preprocess_frames(img, out_path, idx):
     if img is not None and img.size != 0:
         cv2.imwrite(join(out_path, SUBFOLDER_PROCESSED, f'{idx}.jpg'), img)
     return img
-
-
-@tw.profile
-def create_dataset(frames: list):
-    print(f'VPRO> Reading {len(frames)} into dataset')
-    frames = [np.zeros((850, 850, 3), dtype=np.uint8) if frames[i] is None or frames[i].size == 0 else frames[i] for i in
-              range(1, len(frames))]
-    return frames
 
 
 def majority_vote(y_pred, majority: float = 0.65) -> list:

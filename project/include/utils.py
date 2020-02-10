@@ -22,7 +22,7 @@ def load_images(path: str = './C001R_Cut', img_type:str = 'jpg') -> list:
     return frames
 
 
-def load_image(path: str) -> np.array:
+def load_image(path: str) -> np.ndarray:
     print(f'UTIL> Loading picture {path}')
 
     image_path = os.path.join(os.getcwd(), path)
@@ -30,7 +30,7 @@ def load_image(path: str) -> np.array:
     return image
 
 
-def show_image(data: np.array, name: str = 'Single Image', w: int = 1200, h: int = 900, time: int = 0) -> None:
+def show_image(data: np.ndarray, name: str = 'Single Image', w: int = 1200, h: int = 900, time: int = 0) -> None:
     cv2.namedWindow(name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(name, w, h)
     cv2.imshow(name, data)
@@ -92,7 +92,7 @@ def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
 
 
 ################### Image functions ##################
-def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 75) -> (np.array, tuple):
+def get_retina_mask(img:np.ndarray, radius_reduction: int = 20, hough_param:int = 75) -> (np.ndarray, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
@@ -127,7 +127,7 @@ def get_retina_mask(img:np.array, radius_reduction: int = 20, hough_param:int = 
         return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
 
 
-def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int = 8) -> np.array:
+def enhance_contrast_image(img:np.ndarray, clip_limit: float = 3.0, tile_size: int = 8) -> np.ndarray:
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
@@ -141,12 +141,12 @@ def enhance_contrast_image(img:np.array, clip_limit: float = 3.0, tile_size: int
     return final
 
 
-def crop_to_circle(img: np.array, circle) -> np.array:
+def crop_to_circle(img: np.ndarray, circle) -> np.ndarray:
     x, y, r = circle
     return img[y - r:y + r, x - r:x + r, :]
 
 
-def show_means(means: np.array, weights) -> None:
+def show_means(means: np.ndarray, weights) -> None:
     show_strip = np.zeros((100, means.shape[0] * 100, means.shape[1]))
     progress = 0
     for i, mean in enumerate(means):
@@ -159,7 +159,7 @@ def show_means(means: np.array, weights) -> None:
     show_image(cv2.cvtColor(show_strip, cv2.COLOR_HSV2BGR))
 
 
-def get_hsv_colors(n: int) -> np.array:
+def get_hsv_colors(n: int) -> np.ndarray:
     colors = np.zeros((n, 3), dtype=np.uint8)
     hue = np.arange(0, 180, 180 / n)
     colors[:, 0] = hue
@@ -167,12 +167,32 @@ def get_hsv_colors(n: int) -> np.array:
     return colors
 
 
-def plot_historgram_one_channel(img: np.array) -> None:
+def plot_historgram_one_channel(img: np.ndarray) -> None:
     hist = cv2.calcHist([img], channels=[0], mask=None, histSize=[256], ranges=[0, 256])
     plt.plot(hist, 'g.')
     plt.xlim([0, 255])
     plt.ylim(0, max(hist))
     plt.show()
+
+
+def do_five_crop(img: np.ndarray, height: int, width: int, state: int = 0) -> np.ndarray:
+    if state == 0:
+        top = (img.shape[0] - height) // 2
+        left = (img.shape[1] - width) // 2
+    elif state == 1:
+        top = int(img.shape[0] * 0.1)
+        left = int(img.shape[1] * 0.1)
+    elif state == 2:
+        top = int(img.shape[0] * 0.4)
+        left = int(img.shape[1] * 0.1)
+    elif state == 3:
+        top = int(img.shape[0] * 0.1)
+        left = int(img.shape[1] * 0.4)
+    else:
+        top = int(img.shape[0] * 0.4)
+        left = int(img.shape[1] * 0.4)
+    return img[top:top + height, left:left + width]
+
 
 ########################## Video functions ###############################
 
