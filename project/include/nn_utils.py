@@ -64,7 +64,7 @@ class RetinaDataset(Dataset):
 
 
 class FiveCropRetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, size=299, augmentations=None, use_prefix=False):
+    def __init__(self, csv_file, root_dir, size, file_type='.png', balance_ratio=1.0, augmentations=None, use_prefix=False):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -85,9 +85,8 @@ class FiveCropRetinaDataset(Dataset):
         return len(self.labels_df) * self.num_crops
 
     def get_weight(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        severity = self.labels_df.iloc[idx, 1]
+        assert not torch.is_tensor(idx)
+        severity = self.labels_df.iloc[idx // self.num_crops, 1]
         return self.ratio if severity == 0 else 1.0
 
     def __getitem__(self, idx):
@@ -170,7 +169,7 @@ class RetinaNet(nn.Module):
         self.avg_pooling = self.stump.avg_pool
         self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
 
-        self.after_pooling = nn.Sequential(nn.Dropout(p=0.5), nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
+        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
         #self.fc1 = nn.Linear(self.out_stump, 256)
         #self.fc2 = nn.Linear(256, 2)
         #self.softmax = nn.Softmax()
@@ -252,3 +251,27 @@ def calc_scores_from_confusion_matrix(cm):
     f1 = (2 * tp) / (2 * tp + fp + fn)
 
     return {'precision': precision, 'recall': recall, 'f1': f1}
+
+
+class MajorityDict:
+    def __init__(self):
+        self.dict = {}
+
+    def add(self, predictions, ground_truth, key_list):
+        for i, (true, pred) in enumerate(zip(ground_truth, predictions)):
+            if self.dict.get(key_list[i]):
+                entry = self.dict[key_list[i]]
+                entry[str(pred)] += 1
+                entry['count'] += 1
+            else:
+                self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1, 'label': int(true)}
+
+    def get_predictions_and_labels(self, ratio: float = 1.0):
+        labels, preds = [], []
+        for i, item in self.dict.items():
+            if item['0'] > item['1'] * ratio:
+                preds.append(0)
+            else:
+                preds.append(1)
+            labels.append(item['label'])
+        return {'predictions': preds, 'labels': labels}

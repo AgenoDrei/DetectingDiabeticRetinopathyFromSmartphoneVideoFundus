@@ -28,16 +28,17 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
+        'data': os.path.basename(model_path),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 600,
+        'image_size': 640,
         'crop_size': 299,
         'freeze': 0.0,
-        'stump_pooling': False,
         'balance': 0.5,
+        'stump_pooling': False,
         'pretraining': True,
         'preprocessing': False
     }

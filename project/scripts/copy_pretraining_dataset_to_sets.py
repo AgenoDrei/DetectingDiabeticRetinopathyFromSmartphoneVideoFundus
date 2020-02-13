@@ -1,43 +1,54 @@
-import pandas as pd
+import argparse
 import os
-from os import path
-from sklearn.utils import shuffle
+from os.path import join
+from shutil import copy
+import pandas as pd
+from sklearn.model_selection import StratifiedShuffleSplit
 from tqdm import tqdm
 
-BASE_PATH = "/data/simon/Datasets/2015-2019-blindness-detection-images/"
-LABELS_PATH = "retina_labels.csv"
-DATA_PATH = "retina_data"
-TEST_PATH, VAL_PATH = "retina_data_test", "retina_data_val"
+DATA_FOLDER = 'combined'
 
-os.mkdir(path.join(BASE_PATH, TEST_PATH))
-os.mkdir(path.join(BASE_PATH, VAL_PATH))
+def run(input_path, labels_path, val_size):
+    df = pd.read_csv(labels_path)
+    df['image'] = df.image.astype(str)
+    df_val = pd.DataFrame(columns=df.columns)
+    df_train = pd.DataFrame(columns=df.columns)
 
-df:pd.DataFrame = pd.read_csv(path.join(BASE_PATH, LABELS_PATH))
-df = shuffle(df)
+    X, y = df['image'], df['level']
+    splitter = StratifiedShuffleSplit(n_splits=1, test_size=val_size)
+    split = next(splitter.split(X, y))
 
-df['image'] = df.image.astype(str)
-df['level'] = df.level.map(lambda v: 0 if v <= 1 else 1)
-print(df.level.value_counts())
+    for idx in tqdm(split[0], total=len(split[0]), desc='Train data'):  # idx of train set
+        df_train = process_row(input_path, df.iloc[idx, 0], df.iloc[idx, 1], 'train', df_train)
+    for idx in tqdm(split[1], total=len(split[1]), desc='Val data'):  # idx of validation set
+        df_val = process_row(input_path, df.iloc[idx, 0], df.iloc[idx, 1], 'val', df_val)
 
-df_val = pd.DataFrame(columns=df.columns)
-df_test = pd.DataFrame(columns=df.columns)
-df_train = pd.DataFrame(columns=df.columns)
-df.reset_index(inplace=True, drop=True)
+    df_val.to_csv(join(input_path, 'labels_val.csv'), index=False)
+    df_train.to_csv(join(input_path, 'labels_train.csv'), index=False)
 
-for i, row in tqdm(df.iterrows(), total=len(df)):
-    if i < 0.05 * len(df):
-        df_val = df_val.append(row.to_dict(), ignore_index=True)
-        os.rename(path.join(BASE_PATH, DATA_PATH, f'{row.image}.jpg'), path.join(BASE_PATH, VAL_PATH, f'{row.image}.jpg'))
-        continue
-    elif 0.05 * len(df) <= i < 0.1 * len(df):
-        df_test = df_test.append(row.to_dict(), ignore_index=True)
-        os.rename(path.join(BASE_PATH, DATA_PATH, f'{row.image}.jpg'), path.join(BASE_PATH, TEST_PATH, f'{row.image}.jpg'))
-        continue
-    else:
-        df_train = df_train.append(row.to_dict(), ignore_index=True)
-        continue
 
-print(f'Len train: {len(df_train)}, Len val: {len(df_val)}, Len test: {len(df_test)}')
-df_train.to_csv(path.join(BASE_PATH, 'retina_labels_train.csv'), index=False)
-df_val.to_csv(path.join(BASE_PATH, 'retina_labels_val.csv'), index=False)
-df_test.to_csv(path.join(BASE_PATH, 'retina_labels_test.csv'), index=False)
+def process_row(path, image, level, set, set_df):
+    severity = 1 if level > 0 else 0
+    set_df = set_df.append({'image': image, 'level': severity}, ignore_index=True)
+    copy(join(path, DATA_FOLDER, image + '.jpg'), join(path, set, image + '.jpg'))
+    return set_df
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    a = argparse.ArgumentParser()
+    a.add_argument("--input", help="absolute path to input folder")
+    a.add_argument("--labels", help="absolute path to input folder")
+    a.add_argument("--valsize", help="Percentage of validation set size", type=float, default=0.1)
+    args = a.parse_args()
+
+    os.mkdir(join(args.input, 'train'))
+    os.mkdir(join(args.input, 'val'))
+
+    run(args.input, args.labels, args.valsize)
+
+
+
+
+
+
