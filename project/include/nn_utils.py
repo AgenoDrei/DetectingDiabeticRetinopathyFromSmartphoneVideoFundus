@@ -226,7 +226,9 @@ def get_video_desc(video_path):
     video_name = os.path.splitext(video_name)[0]
     info_parts = video_name.split("_")
 
-    if len(info_parts) == 2:
+    if len(info_parts) == 1:
+        return {'eye_id': info_parts[0]}
+    elif len(info_parts) == 2:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
     else:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}

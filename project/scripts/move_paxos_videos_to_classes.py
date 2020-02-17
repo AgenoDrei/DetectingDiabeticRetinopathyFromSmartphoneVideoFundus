@@ -19,7 +19,7 @@ def run(input_path, output_path, labels_path, ignore_files=False):
     :return:
     """
     name_pattern = re.compile(r"([A-Z])(\d){3}[RL](\d)?")
-    all_files = list(Path(input_path).rglob('*.MOV'))
+    all_files = list(Path(input_path).rglob('*.png'))
     filtered_files = [str(f.absolute()) for f in all_files if name_pattern.search(str(f)) is not None]
 
     df = pd.read_excel(labels_path, sheet_name='Paxos 4.7')
