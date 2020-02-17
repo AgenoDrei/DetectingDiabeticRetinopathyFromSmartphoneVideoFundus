@@ -35,8 +35,7 @@ def process_row(path, image, level, set, set_df):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    a = argparse.ArgumentParser()
+    a = argparse.ArgumentParser(description='Split Kaggle dataset into train and validation set using stratified shuffling')
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--labels", help="absolute path to input folder")
     a.add_argument("--valsize", help="Percentage of validation set size", type=float, default=0.1)

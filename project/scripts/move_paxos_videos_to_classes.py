@@ -49,8 +49,7 @@ def move_corresponding_files(id, filtered_files, path, class_id):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    a = argparse.ArgumentParser()
+    a = argparse.ArgumentParser(description='Split paxos dataset into positive/negative videos and create CSV file usable for training')
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--labels", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")

@@ -14,6 +14,13 @@ from tqdm import tqdm
 
 
 def run(input_path, labels_path, val_size):
+    '''
+    Split Paxos trainings data into train and validtation set using stratified shuffeling
+    :param input_path: Path to input data (should have folders pos/neg
+    :param labels_path: Path to CSV describing images (row 0) and level (row 1)
+    :param val_size: Size of validation set
+    :return:
+    '''
     df = pd.read_csv(labels_path)
     df['image'] = df.image.astype(str)
     df_val = pd.DataFrame(columns=df.columns)
@@ -45,8 +52,7 @@ def copy_files(id, input_path, level, set_id):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    a = argparse.ArgumentParser()
+    a = argparse.ArgumentParser(description='Split Paxos trainings data into train/val set using stratified shuffling')
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--labels", help="absolute path to input folder")
     a.add_argument("--valsize", help="Percentage of validation set size", type=float, default=0.1)

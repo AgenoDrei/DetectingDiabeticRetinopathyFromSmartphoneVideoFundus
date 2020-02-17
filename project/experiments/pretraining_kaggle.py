@@ -27,15 +27,15 @@ def run(base_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
+        'data': os.path.basename(base_path),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'optimizer': optim.Adam.__class__.__name__,
+        'optimizer': optim.Adam.__name__,
         'image_size': 600,
         'crop_size': 299,
         'freeze': 0.0,
-        'stump_pooling': True,
         'balance': 0.3,
         'preprocessing': False
     }
@@ -52,7 +52,6 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
     aug_pipeline_val = alb.Compose([
-        alb.Resize(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         alb.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
@@ -89,11 +88,11 @@ def prepare_model(hp):
 
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
-    set_names = ('retina_data_train', 'retina_data_val') if not hp['preprocessing'] else ('retina_processed_data_train', 'retina_processed_data_val')
-    train_dataset = nn_utils.RetinaDataset(join(base_name, 'retina_labels_train.csv'), join(base_name, set_names[0]),
+    set_names = ('train2', 'val2') if not hp['preprocessing'] else ('train_pp', 'val_pp')
+    train_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
                                            augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
-    val_dataset = nn_utils.FiveCropRetinaDataset(join(base_name, 'retina_labels_val.csv'), join(base_name, set_names[1]),
-                                                 augmentations=aug_pipeline_val, file_type='.jpg', size=400)
+    val_dataset = nn_utils.FiveCropRetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
+                                                 augmentations=aug_pipeline_val, file_type='.jpg', size=(hp['image_size'], hp['crop_size']))
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -156,7 +155,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     running_loss = 0.0
     majority_dict = nn_utils.MajorityDict()
 
-    for i, batch in enumerate(loader):
+    for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         crop_idx = batch['image_idx']
