@@ -4,14 +4,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import cv2
 import os
-
+import albumentations as alb
+from albumentations.pytorch import ToTensorV2
 from torch import nn
 from torch.utils.data import Dataset
 from torchvision import utils
-from skimage import io
-from skimage import transform as trans
 import utils as utl
-
+import nn_processing
 
 class RetinaDataset(Dataset):
     def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False):
@@ -54,7 +53,7 @@ class RetinaDataset(Dataset):
         img = cv2.imread(img_name)
         #image = image[:,:,[2, 1, 0]]
 
-        sample = {'image': img, 'label': severity}
+        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0])['eye_id']}
         if self.transform:
             sample['image'] = img[:, :, [2, 1, 0]]
             sample['image'] = self.transform(sample['image'])
@@ -64,13 +63,11 @@ class RetinaDataset(Dataset):
 
 
 class FiveCropRetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, size=299, augmentations=None, use_prefix=False):
+    def __init__(self, csv_file, root_dir, size, file_type='.png', balance_ratio=1.0, augmentations=None, use_prefix=False):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
             root_dir (string): Directory with all the images.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
         """
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
@@ -85,9 +82,8 @@ class FiveCropRetinaDataset(Dataset):
         return len(self.labels_df) * self.num_crops
 
     def get_weight(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        severity = self.labels_df.iloc[idx, 1]
+        assert not torch.is_tensor(idx)
+        severity = self.labels_df.iloc[idx // self.num_crops, 1]
         return self.ratio if severity == 0 else 1.0
 
     def __getitem__(self, idx):
@@ -109,30 +105,35 @@ class FiveCropRetinaDataset(Dataset):
 
         sample = {'image': img, 'label': severity, 'image_idx': image_idx}
         if self.augs:
-            img = utl.do_five_crop(img, self.size, self.size, crop_idx)
+            img = cv2.resize(img, (self.size[0], self.size[0]))
+            img = utl.do_five_crop(img, self.size[1], self.size[1], crop_idx)
             sample['image'] = self.augs(image=img)['image']
         return sample
 
 
 class SnippetDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None):
-        assert transform is None or augmentations is None
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, validation=False, augmentations=None):
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.file_type = file_type
         self.augs = augmentations
         self.ratio = balance_ratio
+        self.mode = 'val' if validation else 'train'
+        self.num_crops = 5
 
     def __len__(self):
-        return len(self.labels_df)
+        return len(self.labels_df) if self.mode == 'train' else len(self.labels_df) * self.num_crops
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        severity = self.labels_df.iloc[idx, 1]
+        assert not torch.is_tensor(idx)
+
+        image_idx = idx // self.num_crops if self.mode == 'val' else idx
+        crop_idx = idx % self.num_crops
+
+        severity = self.labels_df.iloc[image_idx, 1]
         prefix = 'pos' if severity == 1 else 'neg'
 
-        video_name = self.labels_df.iloc[idx, 0]
+        video_name = self.labels_df.iloc[image_idx, 0]
         video_desc = get_video_desc(video_name)
 
         files = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_desc['eye_id'] == get_video_desc(f)['eye_id']]
@@ -143,9 +144,14 @@ class SnippetDataset(Dataset):
         #print(len(frame_names))
 
         sample = {'frames': [], 'label': severity, 'name': video_desc['eye_id'][:5]}
+        crop_state = np.random.randint(0, 5) if self.mode == 'train' else crop_idx
         for name in frame_names:
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
-            img =  self.augs(image=img)['image'] if self.augs else img
+            img =  self.augs(image=img)['image'] if self.augs else img                  # TODO: Maybe improve later on
+            # Apply cropping after image augmentations, continue with transformation afterwards
+            img = utl.do_five_crop(img, 299, 299, state=crop_state)
+            img = alb.Normalize().apply(img)
+            img = ToTensorV2().apply(img)
             sample['frames'].append(img)
 
         sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
@@ -170,7 +176,7 @@ class RetinaNet(nn.Module):
         self.avg_pooling = self.stump.avg_pool
         self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
 
-        self.after_pooling = nn.Sequential(nn.Dropout(p=0.5), nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
+        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
         #self.fc1 = nn.Linear(self.out_stump, 256)
         #self.fc2 = nn.Linear(256, 2)
         #self.softmax = nn.Softmax()
@@ -222,6 +228,11 @@ def save_batch(batch, path):
 
 
 def get_video_desc(video_path):
+    """
+    Get video description in easy usable dictionary
+    :param video_path: path / name of the video_frame file
+    :return: dict(eye_id, snippet_id, frame_id, confidence), only first two are required
+    """
     video_name = os.path.basename(video_path)
     video_name = os.path.splitext(video_name)[0]
     info_parts = video_name.split("_")
@@ -230,9 +241,10 @@ def get_video_desc(video_path):
         return {'eye_id': info_parts[0]}
     elif len(info_parts) == 2:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
-    else:
+    elif len(info_parts) > 3:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}
-
+    else:
+        return {'eye_id': ''}
 
 def dfs_freeze(model):
     for name, child in model.named_children():
@@ -242,6 +254,11 @@ def dfs_freeze(model):
 
 
 def calc_scores_from_confusion_matrix(cm):
+    """
+    Calc precision, recall and f1 score from a 2x2 numpy confusion matrix
+    :param cm: confusion matrix, numpy 2x2 ndarray
+    :return: dict(precision, recall, f1)
+    """
     tp = cm[1, 1].item()
     fp = cm[0, 1].item()
     fn = cm[1, 0].item()
@@ -254,3 +271,50 @@ def calc_scores_from_confusion_matrix(cm):
     f1 = (2 * tp) / (2 * tp + fp + fn)
 
     return {'precision': precision, 'recall': recall, 'f1': f1}
+
+
+class MajorityDict:
+    def __init__(self):
+        self.dict = {}
+
+    def add(self, predictions, ground_truth, key_list):
+        """
+        Add network predictions to Majority Dict, has to be called for every batch of the validation set
+        :param predictions: list of predictions
+        :param ground_truth: list of correct, known labels
+        :param key_list: list of keys (like video id)
+        :return: None
+        """
+        for i, (true, pred) in enumerate(zip(ground_truth, predictions)):
+            if self.dict.get(key_list[i]):
+                entry = self.dict[key_list[i]]
+                entry[str(pred)] += 1
+                entry['count'] += 1
+            else:
+                self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1, 'label': int(true)}
+
+    def get_predictions_and_labels(self, ratio: float = 0.5):
+        """
+        Do majority voting to get final predicions aggregated over all elements sharing the same key
+        :param ratio: Used to shange majority percentage (default 50/50)
+        :return: dict(predictions, labels)
+        """
+        labels, preds = [], []
+        for i, item in self.dict.items():
+            if item['1'] > ratio * (item['0'] + item['1']):
+                preds.append(1)
+            else:
+                preds.append(0)
+            labels.append(item['label'])
+        return {'predictions': preds, 'labels': labels}
+
+    def get_roc_data(self, step_size: float = 0.05):
+        """
+        Generate predictions for different thresholds
+        :param step_size: step_size between different thresholds
+        :return: dict(step: dict)
+        """
+        roc_data = {}
+        for i in np.arange(0, 1.0, step_size):
+            roc_data[i] = self.get_predictions_and_labels(ratio=i)
+        return roc_data

@@ -12,7 +12,7 @@ import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
 from nn_processing import RandomFiveCrop
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -28,6 +28,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
+        'data': os.path.basename(base_path),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
@@ -36,8 +37,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'image_size': 600,
         'crop_size': 299,
         'freeze': 0.0,
-        'stump_pooling': False,
         'balance': 0.5,
+        'stump_pooling': False,
         'pretraining': True,
         'preprocessing': False
     }
@@ -79,7 +80,7 @@ def prepare_model(model_path, hp):
 def prepare_dataset(base_name: str, hp):
     aug_pipeline_train = A.Compose([
             A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-            RandomFiveCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
+            # RandomFiveCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
             A.HorizontalFlip(p=0.5),
             A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
             A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
@@ -87,20 +88,20 @@ def prepare_dataset(base_name: str, hp):
             A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
             A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
-            A.Normalize(always_apply=True, p=1.0),
-            ToTensorV2(always_apply=True, p=1.0)
+            # A.Normalize(always_apply=True, p=1.0),
+            # ToTensorV2(always_apply=True, p=1.0)
         ], p=1.0)
 
     aug_pipeline_val = A.Compose([
         A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-        A.CenterCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-        A.Normalize(always_apply=True, p=1.0),
-        ToTensorV2(always_apply=True, p=1.0)
+        #A.CenterCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
+        #A.Normalize(always_apply=True, p=1.0),
+        #ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
 
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
-    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val)
+    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, validation=True)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -162,9 +163,9 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
-    majority_dict = {}
+    majority_dict = MajorityDict()
 
-    for i, batch in enumerate(loader):
+    for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['frames'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         video_name = batch['name']
@@ -178,13 +179,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-        for i, (true, pred) in enumerate(zip(labels, preds)):
-            if majority_dict.get(video_name[i]):
-                entry = majority_dict[video_name[i]]
-                entry['pos' if int(pred) else 'neg'] += 1
-                entry['count'] += 1
-            else:
-                majority_dict[video_name[i]] = {'pos': 1 if int(pred) else 0, 'neg': 1 if not int(pred) else 0, 'count': 1, 'label': int(true)}
+        majority_dict.add(preds, labels, video_name)
 
     scores = calc_scores_from_confusion_matrix(cm)
     writer.add_scalar('val/f1', scores['f1'], cur_epoch)
@@ -193,16 +188,11 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     writer.add_scalar('val/loss', running_loss / len(loader.dataset), cur_epoch)
     print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
 
-    labels, preds = [], []
-    for i, item in majority_dict.items():
-        if item['pos'] >= item['neg']:
-            preds.append(1)
-        else:
-            preds.append(0)
-        labels.append(item['label'])
+    majority_res = majority_dict.get_predictions_and_labels()
+    labels, preds = majority_res['labels'], majority_res['predictions']
 
-    #print(majority_dict)
-    print(labels, preds)
+    # print(majority_dict)
+    #   print(labels, preds)
     f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
     print(f'Validation scores (eye level):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
 

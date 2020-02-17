@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -27,11 +27,12 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
+        'data': os.path.basename(base_path),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'optimizer': optim.Adam.__class__.__name__,
+        'optimizer': optim.Adam.__name__,
         'image_size': 400,
         'crop_size': 299,
         'freeze': 0.5,
@@ -159,10 +160,12 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
+    majority_dict = MajorityDict()
 
     for i, batch in enumerate(loader):
         inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
+        eye_ids = batch['eye_id']
 
         with torch.no_grad():
             outputs = model(inputs)
@@ -173,12 +176,18 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
+        majority_dict.add(preds, labels, eye_ids)
+
     scores = calc_scores_from_confusion_matrix(cm)
     writer.add_scalar('val/f1', scores['f1'], cur_epoch)
     writer.add_scalar('val/precision', scores['precision'], cur_epoch)
     writer.add_scalar('val/recall', scores['recall'], cur_epoch)
     writer.add_scalar('val/loss', running_loss / len(loader.dataset), cur_epoch)
     print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+
+    votings = majority_dict.get_predictions_and_labels()
+    preds, labels = votings['predictions'], votings['labels']
+    writer.add_scalar('val/eyef1', f1_score(labels, preds), cur_epoch)
 
     return running_loss / len(loader.dataset), scores['f1']
 
