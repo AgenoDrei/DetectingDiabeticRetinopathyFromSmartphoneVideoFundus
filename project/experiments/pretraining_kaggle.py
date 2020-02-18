@@ -145,11 +145,12 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
+    validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
     torch.save(model.state_dict(), f'model{description}')
     return model
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float, float]:
+def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
@@ -186,6 +187,13 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
     print(f'Validation scores (all 5 crops):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
     writer.add_scalar('val/crof1', f1_video, cur_epoch)
+
+    if calc_roc:
+        roc_data = majority_dict.get_roc_data()
+        roc_scores = {}
+        for i, d in enumerate(roc_data):
+            roc_scores[i] = f1_score(d['labels'], d['predictions'])
+        writer.add_scalars('val/f1_roc', roc_scores)
 
     return running_loss / len(loader.dataset), scores['f1']
 

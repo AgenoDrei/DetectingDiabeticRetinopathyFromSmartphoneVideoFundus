@@ -180,17 +180,17 @@ def do_five_crop(img: np.ndarray, height: int, width: int, state: int = 0) -> np
         top = (img.shape[0] - height) // 2
         left = (img.shape[1] - width) // 2
     elif state == 1:
-        top = int(img.shape[0] * 0.1)
-        left = int(img.shape[1] * 0.1)
+        top = int(img.shape[0] * 0.05)
+        left = int(img.shape[1] * 0.05)
     elif state == 2:
-        top = int(img.shape[0] * 0.4)
-        left = int(img.shape[1] * 0.1)
+        top = int(img.shape[0] * 0.45)
+        left = int(img.shape[1] * 0.05)
     elif state == 3:
-        top = int(img.shape[0] * 0.1)
-        left = int(img.shape[1] * 0.4)
+        top = int(img.shape[0] * 0.05)
+        left = int(img.shape[1] * 0.45)
     else:
-        top = int(img.shape[0] * 0.4)
-        left = int(img.shape[1] * 0.4)
+        top = int(img.shape[0] * 0.45)
+        left = int(img.shape[1] * 0.45)
     return img[top:top + height, left:left + width]
 
 

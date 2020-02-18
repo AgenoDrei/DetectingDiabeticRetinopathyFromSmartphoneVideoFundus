@@ -12,6 +12,7 @@ from torchvision import utils
 import utils as utl
 import nn_processing
 
+
 class RetinaDataset(Dataset):
     def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False):
         """
@@ -53,7 +54,7 @@ class RetinaDataset(Dataset):
         img = cv2.imread(img_name)
         #image = image[:,:,[2, 1, 0]]
 
-        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0])['eye_id']}
+        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
         if self.transform:
             sample['image'] = img[:, :, [2, 1, 0]]
             sample['image'] = self.transform(sample['image'])
@@ -227,17 +228,18 @@ def save_batch(batch, path):
         cv2.imwrite(os.path.join(path, f'{i}_{label_batch[i]}.png'), img.numpy().transpose((1, 2, 0)))
 
 
-def get_video_desc(video_path):
+def get_video_desc(video_path, only_eye = False):
     """
     Get video description in easy usable dictionary
     :param video_path: path / name of the video_frame file
+    :param only_eye: Only returns the first part of the string
     :return: dict(eye_id, snippet_id, frame_id, confidence), only first two are required
     """
     video_name = os.path.basename(video_path)
     video_name = os.path.splitext(video_name)[0]
     info_parts = video_name.split("_")
 
-    if len(info_parts) == 1:
+    if len(info_parts) == 1 or only_eye:
         return {'eye_id': info_parts[0]}
     elif len(info_parts) == 2:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
