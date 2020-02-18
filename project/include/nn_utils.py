@@ -52,7 +52,7 @@ class RetinaDataset(Dataset):
             prefix = ''
         img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
         img = cv2.imread(img_name)
-        #image = image[:,:,[2, 1, 0]]
+        # image = image[:,:,[2, 1, 0]]
 
         sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
         if self.transform:
@@ -60,6 +60,30 @@ class RetinaDataset(Dataset):
             sample['image'] = self.transform(sample['image'])
         if self.augs:
             sample['image'] = self.augs(image=img)['image']
+        return sample
+
+
+class MultiChannelRetinaDataset(RetinaDataset):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, augmentations=None, use_prefix=False, processed_suffix='_nn'):
+        super().__init__(csv_file, root_dir, file_type, balance_ratio, None, augmentations, use_prefix)
+        self.suffix = processed_suffix
+
+    def __getitem__(self, idx):
+        assert not torch.is_tensor(idx)
+        severity = self.labels_df.iloc[idx, 1]
+        if self.use_prefix:
+            prefix = 'pos' if severity == 1 else 'neg'
+        else:
+            prefix = ''
+        img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
+        processed_name = os.path.join(self.root_dir + self.suffix, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
+        img = cv2.imread(img_name)
+        processed_img = cv2.imread(processed_name)
+        sample = {'image': torch.cat([img, processed_img]), 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
+        if self.augs:
+            img = self.augs(image=img)['image']
+            processed_img = self.augs(image=processed_img)['image']
+            sample['image'] = torch.cat([img, processed_img])
         return sample
 
 
@@ -102,7 +126,7 @@ class FiveCropRetinaDataset(Dataset):
 
         img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[image_idx, 0] + self.file_type)
         img = cv2.imread(img_name)
-        #image = image[:,:,[2, 1, 0]]
+        # image = image[:,:,[2, 1, 0]]
 
         sample = {'image': img, 'label': severity, 'image_idx': image_idx}
         if self.augs:
@@ -138,17 +162,17 @@ class SnippetDataset(Dataset):
         video_desc = get_video_desc(video_name)
 
         files = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_desc['eye_id'] == get_video_desc(f)['eye_id']]
-        #if len(frame_index) - 1 < video_index:
+        # if len(frame_index) - 1 < video_index:
         #    print('Problem with video ', video_name, video_index)
 
         frame_names = sorted([f for f in files if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
-        #print(len(frame_names))
+        # print(len(frame_names))
 
         sample = {'frames': [], 'label': severity, 'name': video_desc['eye_id'][:5]}
         crop_state = np.random.randint(0, 5) if self.mode == 'train' else crop_idx
         for name in frame_names:
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
-            img =  self.augs(image=img)['image'] if self.augs else img                  # TODO: Maybe improve later on
+            img = self.augs(image=img)['image'] if self.augs else img  # TODO: Maybe improve later on
             # Apply cropping after image augmentations, continue with transformation afterwards
             img = utl.do_five_crop(img, 299, 299, state=crop_state)
             img = alb.Normalize().apply(img)
@@ -178,17 +202,17 @@ class RetinaNet(nn.Module):
         self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
 
         self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
-        #self.fc1 = nn.Linear(self.out_stump, 256)
-        #self.fc2 = nn.Linear(256, 2)
-        #self.softmax = nn.Softmax()
+        # self.fc1 = nn.Linear(self.out_stump, 256)
+        # self.fc2 = nn.Linear(256, 2)
+        # self.softmax = nn.Softmax()
 
     def forward(self, x):
         features = []
-        for idx in range(0, x.size(1)):                             # Iterate over time dimension
-            out = self.stump.features(x[:, idx, :, :, :])           # Shove batch trough stump
+        for idx in range(0, x.size(1)):  # Iterate over time dimension
+            out = self.stump.features(x[:, idx, :, :, :])  # Shove batch trough stump
             out = self.avg_pooling(out) if self.pool_stump else out
-            out = out.view(out.size(0), -1)                         # Flatten results for fc
-            features.append(out)                                    # Size: (B, c*h*w)
+            out = out.view(out.size(0), -1)  # Flatten results for fc
+            features.append(out)  # Size: (B, c*h*w)
         out = torch.cat(features, dim=1)
         out = self.temporal_pooling(out.unsqueeze(dim=1))
         out = self.after_pooling(out.view(out.size(0), -1))
@@ -228,7 +252,7 @@ def save_batch(batch, path):
         cv2.imwrite(os.path.join(path, f'{i}_{label_batch[i]}.png'), img.numpy().transpose((1, 2, 0)))
 
 
-def get_video_desc(video_path, only_eye = False):
+def get_video_desc(video_path, only_eye=False):
     """
     Get video description in easy usable dictionary
     :param video_path: path / name of the video_frame file
@@ -247,6 +271,7 @@ def get_video_desc(video_path, only_eye = False):
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}
     else:
         return {'eye_id': ''}
+
 
 def dfs_freeze(model):
     for name, child in model.named_children():
