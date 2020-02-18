@@ -11,7 +11,9 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict
+from custom_inceptionv4 import my_inceptionv4
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
+    MultiChannelRetinaDataset
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -27,18 +29,19 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
-        'data': os.path.basename(base_path),
+        'data': os.path.normpath(base_path),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 450,
-        'crop_size': 399,
+        'image_size': 350,
+        'crop_size': 299,
         'freeze': 0.5,
         'balance': 0.5,
         'pretraining': True,
-        'preprocessing': True
+        'preprocessing': False,
+        'mulit_channel': True
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
@@ -46,7 +49,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
     net = prepare_model(model_path, hyperparameter)
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
+                              weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
 
@@ -56,8 +60,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
 
 def prepare_model(model_path, hp):
-    #stump = models.alexnet(pretrained=True)
-    stump = ptm.inceptionv4()
+    # stump = models.alexnet(pretrained=True)
+    stump = ptm.inceptionv4() if not hp['multi_channel'] else my_inceptionv4()
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
@@ -76,18 +80,18 @@ def prepare_model(model_path, hp):
 
 def prepare_dataset(base_name: str, hp):
     aug_pipeline_train = A.Compose([
-            A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-            A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-            A.HorizontalFlip(p=0.5),
-            A.CoarseDropout(min_holes=1, max_holes=4, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
-            A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
-            A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
-            A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
-            A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
-            A.Normalize(always_apply=True, p=1.0),
-            ToTensorV2(always_apply=True, p=1.0)
-        ], p=1.0)
+        A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
+        A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
+        A.HorizontalFlip(p=0.5),
+        A.CoarseDropout(min_holes=1, max_holes=4, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
+        A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
+        A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
+        # A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
+        # A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
+        A.Normalize(always_apply=True, p=1.0),
+        ToTensorV2(always_apply=True, p=1.0)
+    ], p=1.0)
 
     aug_pipeline_val = A.Compose([
         A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
@@ -97,8 +101,16 @@ def prepare_dataset(base_name: str, hp):
     ], p=1.0)
 
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='', use_prefix=True)
-    val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, file_type='', use_prefix=True)
+    if not hp['multi_channel']:
+        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train,
+                                      balance_ratio=hp['balance'], file_type='', use_prefix=True)
+        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, file_type='',
+                                    use_prefix=True)
+    else:
+        train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train,
+                                                  balance_ratio=hp['balance'], file_type='', use_prefix=True, processed_suffix='_pp')
+        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val,
+                                                file_type='', use_prefix=True, processed_suffix='_pp')
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -124,7 +136,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
             inputs = batch['image'].to(device, dtype=torch.float)
             labels = batch['label'].to(device)
-            
+
             model.train()
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -152,11 +164,12 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
+    validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
     torch.save(model.state_dict(), f'model{description}')
     return model
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float, float]:
+def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc = False) -> Tuple[float, float]:
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
@@ -190,6 +203,13 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     writer.add_scalar('val/eyef1', f1_score(labels, preds), cur_epoch)
     writer.add_scalar('val/eyeprec', precision_score(labels, preds), cur_epoch)
     writer.add_scalar('val/eyerec', recall_score(labels, preds), cur_epoch)
+
+    if calc_roc:
+        roc_data = majority_dict.get_roc_data()
+        roc_scores = {}
+        for i, d in enumerate(roc_data):
+            roc_scores[i] = f1_score(d['labels'], d['predictions'])
+        writer.add_scalars('val/f1_roc', roc_scores)
 
     return running_loss / len(loader.dataset), scores['f1']
 
