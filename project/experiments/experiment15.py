@@ -33,12 +33,12 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 400,
-        'crop_size': 299,
+        'image_size': 450,
+        'crop_size': 399,
         'freeze': 0.5,
         'balance': 0.5,
         'pretraining': True,
-        'preprocessing': False
+        'preprocessing': True
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
@@ -176,7 +176,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-        majority_dict.add(preds, labels, eye_ids)
+        majority_dict.add(preds.tolist(), labels, eye_ids)
 
     scores = calc_scores_from_confusion_matrix(cm)
     writer.add_scalar('val/f1', scores['f1'], cur_epoch)
@@ -188,6 +188,8 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     votings = majority_dict.get_predictions_and_labels()
     preds, labels = votings['predictions'], votings['labels']
     writer.add_scalar('val/eyef1', f1_score(labels, preds), cur_epoch)
+    writer.add_scalar('val/eyeprec', precision_score(labels, preds), cur_epoch)
+    writer.add_scalar('val/eyerec', recall_score(labels, preds), cur_epoch)
 
     return running_loss / len(loader.dataset), scores['f1']
 
