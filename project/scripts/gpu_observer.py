@@ -15,7 +15,7 @@ def run():
     try:
         endpoint = notify.info()
     except nr.NotConfigured:
-        notify.register()
+        print(notify.register())
 
     free_gpus = get_free_gpus(query)
     if len(free_gpus) > 0:
@@ -70,6 +70,7 @@ class RepeatedTimer(object):
 if __name__ == '__main__':
     print(f'{time.strftime("%H:%M:%S")}> Gpu observer starting...')
 
+    run()
     rt = RepeatedTimer(60 * 5, run)
     try:
         time.sleep(60 * 60 * 24 * 7)  # Run for one week

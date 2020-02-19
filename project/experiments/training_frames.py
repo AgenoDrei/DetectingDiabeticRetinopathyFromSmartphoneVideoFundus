@@ -207,7 +207,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc = Fal
     if calc_roc:
         roc_data = majority_dict.get_roc_data()
         roc_scores = {}
-        for i, d in enumerate(roc_data):
+        for i, d in enumerate(roc_data.values()):
             roc_scores[i] = f1_score(d['labels'], d['predictions'])
         writer.add_scalars('val/f1_roc', roc_scores)
 
