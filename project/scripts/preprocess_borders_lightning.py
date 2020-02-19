@@ -58,11 +58,24 @@ if __name__ == '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")
-    a.add_argument("--improve_light", help="apply ben graham light improvements", default=False, type=bool)
+    a.add_argument("--improve_light", help="apply ben graham light improvements", action="store_true")
+    a.add_argument("--recursive", "-r", help="apply recursivly to all directories", action="store_true")
     args = a.parse_args()
+    print(args)
 
     assert os.path.exists(args.input)
     if os.path.exists(args.output):
         os.rmdir(args.output)
     os.mkdir(args.output)
-    j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, light=args.improve_light) for f in os.listdir(args.input))
+
+    if not args.recursive:
+        j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, light=args.improve_light) for f in os.listdir(args.input))
+    else:
+        files = os.walk(args.input)
+        working_paths = []
+        for path in files:
+            if path[1] == 0 and path[2] != 0:
+                working_paths.append(path[0])
+        for path in working_paths:
+            print('Processing folder: ', path)
+            j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, join(args.input, path), join(args.output, path), light=args.improve_light) for f in os.listdir(path))
