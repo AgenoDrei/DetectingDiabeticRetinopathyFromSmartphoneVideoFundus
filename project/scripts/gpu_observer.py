@@ -69,7 +69,6 @@ class RepeatedTimer(object):
 
 if __name__ == '__main__':
     print(f'{time.strftime("%H:%M:%S")}> Gpu observer starting...')
-    
     run()
     rt = RepeatedTimer(60 * 5, run)
     try:

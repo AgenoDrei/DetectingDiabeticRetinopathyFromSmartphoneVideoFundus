@@ -29,16 +29,16 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
-        'data': os.path.normpath(base_path),
+        'data': os.path.basename(os.path.normpath(base_path)),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 525,
-        'crop_size': 499,
         'freeze': 0.0,
         'balance': 0.6,
+        'image_size': 350,
+        'crop_size': 299,
         'pretraining': True,
         'preprocessing': False,
         'multi_channel': False
@@ -47,7 +47,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
 
-    net = prepare_model(model_path, hyperparameter)
+    net = prepare_model(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
@@ -59,14 +59,14 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
-def prepare_model(model_path, hp):
+def prepare_model(model_path, hp, device):
     # stump = models.alexnet(pretrained=True)
-    stump = ptm.inceptionv4() if not hp['multi_channel'] else my_inceptionv4()
+    stump = ptm.inceptionv4() if not hp['multi_channel'] else my_inceptionv4(pretrained=False)
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
     if hp['pretraining']:
-        stump.load_state_dict(torch.load(model_path))
+        stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.train()
 
@@ -207,9 +207,10 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc = Fal
     if calc_roc:
         roc_data = majority_dict.get_roc_data()
         roc_scores = {}
-        for i, d in enumerate(roc_data):
-            roc_scores[str(i)] = f1_score(d['labels'], d['predictions'])
-        writer.add_scalars('val/f1_roc', roc_scores)
+        for i, d in enumerate(roc_data.values()):
+            roc_scores[i] = f1_score(d['labels'], d['predictions'])
+        for key, val in roc_scores.items():
+            writer.add_scalar('val/f1_roc', val, key)
 
     return running_loss / len(loader.dataset), scores['f1']
 

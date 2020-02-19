@@ -33,15 +33,16 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 600,
-        'crop_size': 299,
+        'image_size': 450,
+        'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.3,
         'preprocessing': False
     }
     aug_pipeline_train = alb.Compose([
         alb.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
-        RandomFiveCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
+        alb.RandomCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
+        # RandomFiveCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         alb.HorizontalFlip(p=0.5),
         alb.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=20, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
         alb.OneOf([alb.GaussNoise(p=0.5), alb.ISONoise(p=0.5), alb.IAAAdditiveGaussianNoise(p=0.25), alb.MultiplicativeNoise(p=0.25)], p=0.3),
@@ -52,6 +53,8 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
     aug_pipeline_val = alb.Compose([
+        alb.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
+        alb.CenterCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         alb.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
@@ -91,8 +94,8 @@ def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train2', 'val2') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
                                            augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
-    val_dataset = nn_utils.FiveCropRetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
-                                                 augmentations=aug_pipeline_val, file_type='.jpg', size=(hp['image_size'], hp['crop_size']))
+    val_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
+                                                 augmentations=aug_pipeline_val, file_type='.jpg')
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -188,12 +191,12 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     print(f'Validation scores (all 5 crops):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
     writer.add_scalar('val/crof1', f1_video, cur_epoch)
 
-    if calc_roc:
+    '''if calc_roc:
         roc_data = majority_dict.get_roc_data()
         roc_scores = {}
         for i, d in enumerate(roc_data):
             roc_scores[i] = f1_score(d['labels'], d['predictions'])
-        writer.add_scalars('val/f1_roc', roc_scores)
+        writer.add_scalars('val/f1_roc', roc_scores)'''
 
     return running_loss / len(loader.dataset), scores['f1']
 
