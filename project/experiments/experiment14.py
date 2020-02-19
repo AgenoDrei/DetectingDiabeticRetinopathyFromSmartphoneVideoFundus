@@ -37,7 +37,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'image_size': 600,
         'crop_size': 299,
         'freeze': 0.0,
-        'balance': 0.5,
+        'balance': 0.4,
         'stump_pooling': False,
         'pretraining': True,
         'preprocessing': False
@@ -50,7 +50,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
-    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
+    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
 
     desc = f'_video_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
@@ -194,6 +194,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     # print(majority_dict)
     #   print(labels, preds)
     f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
+    writer.add_scalar('val/eyef1', f1_video, cur_epoch)
     print(f'Validation scores (eye level):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
 
     return running_loss / len(loader.dataset), scores['f1']

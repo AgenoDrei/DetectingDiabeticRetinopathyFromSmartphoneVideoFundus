@@ -66,9 +66,3 @@ if __name__ == '__main__':
         os.rmdir(args.output)
     os.mkdir(args.output)
     j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, light=args.improve_light) for f in os.listdir(args.input))
-
-
-
-
-
-
