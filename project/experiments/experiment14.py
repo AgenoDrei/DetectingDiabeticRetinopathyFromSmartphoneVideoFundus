@@ -179,7 +179,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-        majority_dict.add(preds, labels, video_name)
+        majority_dict.add(preds.tolist(), labels, video_name)
 
     scores = calc_scores_from_confusion_matrix(cm)
     writer.add_scalar('val/f1', scores['f1'], cur_epoch)
