@@ -79,7 +79,7 @@ class MultiChannelRetinaDataset(RetinaDataset):
         processed_name = os.path.join(self.root_dir + self.suffix, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
         img = cv2.imread(img_name)
         processed_img = cv2.imread(processed_name)
-        sample = {'image': torch.cat([img, processed_img]), 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
+        sample = {'image': None, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
         if self.augs:
             img = self.augs(image=img)['image']
             processed_img = self.augs(image=processed_img)['image']

@@ -29,7 +29,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
-        'data': os.path.normpath(base_path),
+        'data': os.path.basename(os.path.normpath(base_path)),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
@@ -37,17 +37,17 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'optimizer': optim.Adam.__name__,
         'image_size': 350,
         'crop_size': 299,
-        'freeze': 0.5,
-        'balance': 0.5,
+        'freeze': 0.0,
+        'balance': 0.3,
         'pretraining': True,
         'preprocessing': False,
-        'mulit_channel': True
+        'multi_channel': False
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
 
-    net = prepare_model(model_path, hyperparameter)
+    net = prepare_model(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
@@ -59,14 +59,14 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
-def prepare_model(model_path, hp):
+def prepare_model(model_path, hp, device):
     # stump = models.alexnet(pretrained=True)
-    stump = ptm.inceptionv4() if not hp['multi_channel'] else my_inceptionv4()
+    stump = ptm.inceptionv4() if not hp['multi_channel'] else my_inceptionv4(pretrained=False)
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
     if hp['pretraining']:
-        stump.load_state_dict(torch.load(model_path))
+        stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.train()
 
@@ -87,8 +87,8 @@ def prepare_dataset(base_name: str, hp):
         A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
         A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
         A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
-        # A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
-        # A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
+        A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
+        A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
         A.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
