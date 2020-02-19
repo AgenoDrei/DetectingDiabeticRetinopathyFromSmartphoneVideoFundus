@@ -35,13 +35,13 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 350,
-        'crop_size': 299,
-        'freeze': 0.5,
-        'balance': 0.5,
+        'image_size': 525,
+        'crop_size': 499,
+        'freeze': 0.0,
+        'balance': 0.6,
         'pretraining': True,
         'preprocessing': False,
-        'mulit_channel': True
+        'multi_channel': False
     }
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
@@ -52,7 +52,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
-    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.3, patience=5, verbose=True)
+    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
 
     desc = f'_paxos_frames_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
@@ -87,8 +87,8 @@ def prepare_dataset(base_name: str, hp):
         A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
         A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
         A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
-        # A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
-        # A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
+        A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
+        A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
         A.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
@@ -208,7 +208,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc = Fal
         roc_data = majority_dict.get_roc_data()
         roc_scores = {}
         for i, d in enumerate(roc_data):
-            roc_scores[i] = f1_score(d['labels'], d['predictions'])
+            roc_scores[str(i)] = f1_score(d['labels'], d['predictions'])
         writer.add_scalars('val/f1_roc', roc_scores)
 
     return running_loss / len(loader.dataset), scores['f1']
