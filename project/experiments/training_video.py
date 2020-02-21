@@ -3,7 +3,6 @@ import sys
 import time
 from os.path import join
 from typing import Tuple
-
 import albumentations as A
 import cv2
 import torch
@@ -34,11 +33,11 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 600,
-        'crop_size': 299,
+        'image_size': 420,
+        'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.4,
-        'stump_pooling': False,
+        'stump_pooling': True,
         'pretraining': True,
         'preprocessing': False
     }
@@ -80,6 +79,7 @@ def prepare_model(model_path, hp):
 def prepare_dataset(base_name: str, hp):
     aug_pipeline_train = A.Compose([
             A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
+            A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
             # RandomFiveCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
             A.HorizontalFlip(p=0.5),
             A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
@@ -88,20 +88,20 @@ def prepare_dataset(base_name: str, hp):
             A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
             A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
             A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
-            # A.Normalize(always_apply=True, p=1.0),
-            # ToTensorV2(always_apply=True, p=1.0)
+            A.Normalize(always_apply=True, p=1.0),
+            ToTensorV2(always_apply=True, p=1.0)
         ], p=1.0)
 
     aug_pipeline_val = A.Compose([
         A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-        #A.CenterCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-        #A.Normalize(always_apply=True, p=1.0),
-        #ToTensorV2(always_apply=True, p=1.0)
+        A.CenterCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
+        A.Normalize(always_apply=True, p=1.0),
+        ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
 
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
-    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, validation=True)
+    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, validation=False)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -155,11 +155,12 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
+    validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
     torch.save(model.state_dict(), f'model{description}')
     return model
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float, float]:
+def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
@@ -196,6 +197,14 @@ def validate(model, criterion, loader, device, writer, cur_epoch) -> Tuple[float
     f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
     writer.add_scalar('val/eyef1', f1_video, cur_epoch)
     print(f'Validation scores (eye level):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
+
+    if calc_roc:
+        roc_data = majority_dict.get_roc_data()
+        roc_scores = {}
+        for i, d in enumerate(roc_data.values()):
+            roc_scores[i] = f1_score(d['labels'], d['predictions'])
+        for key, val in roc_scores.items():
+            writer.add_scalar('val/f1_roc', val, key)
 
     return running_loss / len(loader.dataset), scores['f1']
 

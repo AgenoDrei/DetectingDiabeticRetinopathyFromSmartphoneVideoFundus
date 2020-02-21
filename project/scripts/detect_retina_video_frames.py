@@ -6,8 +6,6 @@ from tqdm import tqdm
 
 sys.path.append('./')
 sys.path.append('../include/')
-import frame_extract as fe
-import frames_preprocess as fp
 import features as ft
 import time_wrap as tw
 from os.path import join

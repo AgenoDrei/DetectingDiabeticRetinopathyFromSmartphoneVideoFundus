@@ -8,7 +8,7 @@ from utils import show_image, load_images, show_image_row, enhance_contrast_imag
 import unglarer as ug
 
 #NUM_CLUSTERS = 5
-MODEL = 'gmm_model_4.mod'
+MODEL = '../models/gmm_model_4.mod'
 #ARTIFACT_THRESHOLD = 0.05
 #MATRIX_TYPE = cv2.ml.EM_COV_MAT_GENERIC
 
@@ -16,7 +16,7 @@ def run():
     unglarer: ug.GlareRemover = ug.GlareRemover(model_path=MODEL, masked_class=3)
 
     images = load_images('/data/simon/ownCloud/Data/Reflection Dataset/raw_images/', img_type='png')
-    images2 = load_images('./C001R/', img_type='png')
+    images2 = load_images('./C001R_Cut/', img_type='png')
 
     images_subset = [images[i] for i in range(0, len(images))]
     images_subset.extend(images2)

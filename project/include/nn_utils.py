@@ -174,9 +174,9 @@ class SnippetDataset(Dataset):
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
             img = self.augs(image=img)['image'] if self.augs else img  # TODO: Maybe improve later on
             # Apply cropping after image augmentations, continue with transformation afterwards
-            img = utl.do_five_crop(img, 299, 299, state=crop_state)
-            img = alb.Normalize().apply(img)
-            img = ToTensorV2().apply(img)
+            # img = utl.do_five_crop(img, 299, 299, state=crop_state)
+            # img = alb.Normalize().apply(img)
+            # img = ToTensorV2().apply(img)
             sample['frames'].append(img)
 
         sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
@@ -342,6 +342,6 @@ class MajorityDict:
         :return: dict(step: dict)
         """
         roc_data = {}
-        for i in np.arange(0, 1.0, step_size):
+        for i in np.arange(0, 1.001, step_size):
             roc_data[i] = self.get_predictions_and_labels(ratio=i)
         return roc_data
