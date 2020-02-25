@@ -161,7 +161,8 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
-        crop_idx = batch['image_idx']
+        # crop_idx = batch['image_idx']
+        crop_idx = batch['eye_id']
 
         with torch.no_grad():
             outputs = model(inputs)
@@ -172,7 +173,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-        majority_dict.add(preds, labels, crop_idx)
+        majority_dict.add(preds.tolist(), labels, crop_idx)
 
     scores = nn_utils.calc_scores_from_confusion_matrix(cm)
     scores['loss'] = running_loss / len(loader.dataset)
@@ -183,9 +184,9 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
 
     # print(majority_dict)
     # print(labels, preds)
-    f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
-    print(f'Validation scores (all 5 crops):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
-    writer.add_scalar('val/crof1', f1_video, cur_epoch)
+    #f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
+    #print(f'Validation scores (all 5 crops):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
+    #writer.add_scalar('val/crof1', f1_video, cur_epoch)
 
     return running_loss / len(loader.dataset), scores['f1']
 
