@@ -36,9 +36,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
-        'balance': 0.6,
-        'image_size': 350,
-        'crop_size': 299,
+        'balance': 0.45,
+        'image_size': 450,
+        'crop_size': 399,
         'pretraining': True,
         'preprocessing': False,
         'multi_channel': False
@@ -156,8 +156,12 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         writer.add_scalar('train/f1', train_scores['f1'], epoch)
         writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
-
-        best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
+        
+        if val_f1 > best_f1_val:
+            best_f1_val = val_f1
+            torch.save(model.state_dict(), f'best_paxos_frames_model_{val_f1:0.2}.pth')
+     
+        # best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
 
         scheduler.step(val_loss)
 
@@ -165,7 +169,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
     validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
-    torch.save(model.state_dict(), f'model{description}')
+    # torch.save(model.state_dict(), f'model{description}')
     return model
 
 
@@ -205,14 +209,14 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc = Fal
     writer.add_scalar('val/eyerec', recall_score(labels, preds), cur_epoch)
 
     if calc_roc:
-        roc_data = majority_dict.get_roc_data()
-        roc_scores = {}
+        roc_data = majority_dict.get_roc_data(step_size=0.1)
+        roc_scores = []
         for i, d in enumerate(roc_data.values()):
-            roc_scores[i] = f1_score(d['labels'], d['predictions'])
-        for key, val in roc_scores.items():
-            writer.add_scalar('val/f1_roc', val, key)
+            roc_scores.append(f1_score(d['labels'], d['predictions']))
+        for i, val in enumerate(roc_scores):
+            writer.add_scalar('val/f1_roc', val, i)
 
-    return running_loss / len(loader.dataset), scores['f1']
+    return running_loss / len(loader.dataset), f1_score(labels, preds)
 
 
 if __name__ == '__main__':
