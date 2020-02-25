@@ -11,7 +11,8 @@ import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
 from nn_processing import RandomFiveCrop
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict
+from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, write_scores, \
+    write_f1_curve
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -41,9 +42,31 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'pretraining': True,
         'preprocessing': False
     }
+    aug_pipeline_train = A.Compose([
+        A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
+        A.RandomCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
+        # RandomFiveCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
+        A.HorizontalFlip(p=0.5),
+        A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
+        A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
+        A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
+        A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
+        A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
+        A.Normalize(always_apply=True, p=1.0),
+        ToTensorV2(always_apply=True, p=1.0)
+    ], p=1.0)
+
+    aug_pipeline_val = A.Compose([
+        A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
+        A.CenterCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
+        A.Normalize(always_apply=True, p=1.0),
+        ToTensorV2(always_apply=True, p=1.0)
+    ], p=1.0)
+
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
-    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter)
+    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
 
     net:RetinaNet = prepare_model(model_path, hyperparameter)
 
@@ -76,29 +99,7 @@ def prepare_model(model_path, hp):
     return net
 
 
-def prepare_dataset(base_name: str, hp):
-    aug_pipeline_train = A.Compose([
-            A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-            A.RandomCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-            # RandomFiveCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-            A.HorizontalFlip(p=0.5),
-            A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
-            A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
-            A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
-            A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
-            A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
-            A.Normalize(always_apply=True, p=1.0),
-            ToTensorV2(always_apply=True, p=1.0)
-        ], p=1.0)
-
-    aug_pipeline_val = A.Compose([
-        A.Resize(hp['image_size'], hp['image_size'], always_apply=True, p=1.0),
-        A.CenterCrop(hp['crop_size'], hp['crop_size'], always_apply=True, p=1.0),
-        A.Normalize(always_apply=True, p=1.0),
-        ToTensorV2(always_apply=True, p=1.0)
-    ], p=1.0)
-
+def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
     val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, validation=False)
@@ -143,9 +144,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
                 cm[int(true), int(pred)] += 1
 
         train_scores = calc_scores_from_confusion_matrix(cm)
-        print(f'Training scores:\n F1: {train_scores["f1"]},\n Precision: {train_scores["precision"]},\n Recall: {train_scores["recall"]}')
-        writer.add_scalar('train/f1', train_scores['f1'], epoch)
-        writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
+        train_scores['loss'] = running_loss / len(loaders[0].dataset)
+        write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
 
         best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
@@ -183,28 +183,18 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
         majority_dict.add(preds.tolist(), labels, video_name)
 
     scores = calc_scores_from_confusion_matrix(cm)
-    writer.add_scalar('val/f1', scores['f1'], cur_epoch)
-    writer.add_scalar('val/precision', scores['precision'], cur_epoch)
-    writer.add_scalar('val/recall', scores['recall'], cur_epoch)
-    writer.add_scalar('val/loss', running_loss / len(loader.dataset), cur_epoch)
-    print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+    scores['loss'] = running_loss / len(loader.dataset)
+    write_scores(writer, 'val', scores, cur_epoch)
 
     majority_res = majority_dict.get_predictions_and_labels()
     labels, preds = majority_res['labels'], majority_res['predictions']
 
     # print(majority_dict)
     #   print(labels, preds)
-    f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
-    writer.add_scalar('val/eyef1', f1_video, cur_epoch)
-    print(f'Validation scores (eye level):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
+    video_scores = {'f1': f1_score(labels, preds), 'recall': recall_score(labels, preds), 'precision': precision_score(labels, preds)}
+    write_scores(writer, 'val_eye', video_scores, cur_epoch)
 
-    if calc_roc:
-        roc_data = majority_dict.get_roc_data()
-        roc_scores = {}
-        for i, d in enumerate(roc_data.values()):
-            roc_scores[i] = f1_score(d['labels'], d['predictions'])
-        for key, val in roc_scores.items():
-            writer.add_scalar('val/f1_roc', val, key)
+    if calc_roc: write_f1_curve(majority_dict, writer)
 
     return running_loss / len(loader.dataset), scores['f1']
 

@@ -6,6 +6,7 @@ import cv2
 import os
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
+from sklearn.metrics import f1_score
 from torch import nn
 from torch.utils.data import Dataset
 from torchvision import utils
@@ -298,6 +299,25 @@ def calc_scores_from_confusion_matrix(cm):
     f1 = (2 * tp) / (2 * tp + fp + fn)
 
     return {'precision': precision, 'recall': recall, 'f1': f1}
+
+
+def write_f1_curve(majority_dict, writer):
+    roc_data = majority_dict.get_roc_data()
+    roc_scores = {}
+    for i, d in enumerate(roc_data.values()):
+        roc_scores[i] = f1_score(d['labels'], d['predictions'])
+    print('F1 Curve: ', end='')
+    for key, val in roc_scores.items():
+        writer.add_scalar('val/f1_roc', val, key)
+        print(f'{key}: {val}', end=', ')
+
+
+def write_scores(writer, tag: str, scores: dict, cur_epoch: int):
+    writer.add_scalar(f'{tag}/f1', scores['f1'], cur_epoch)
+    writer.add_scalar(f'{tag}/precision', scores['precision'], cur_epoch)
+    writer.add_scalar(f'{tag}/recall', scores['recall'], cur_epoch)
+    if scores.get('loss'): writer.add_scalar(f'{tag}/loss', scores['loss'], cur_epoch)
+    print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
 
 
 class MajorityDict:

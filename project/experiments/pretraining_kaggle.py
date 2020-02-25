@@ -136,9 +136,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
                 cm[int(true), int(pred)] += 1
 
         train_scores = nn_utils.calc_scores_from_confusion_matrix(cm)
-        print(f'Training scores:\n F1: {train_scores["f1"]},\n Precision: {train_scores["precision"]},\n Recall: {train_scores["recall"]}')
-        writer.add_scalar('train/f1', train_scores['f1'], epoch)
-        writer.add_scalar('train/loss', running_loss / len(loaders[0].dataset), epoch)
+        train_scores['loss'] = running_loss / len(loaders[0].dataset)
+        nn_utils.write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
 
         best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
@@ -176,11 +175,8 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
         majority_dict.add(preds, labels, crop_idx)
 
     scores = nn_utils.calc_scores_from_confusion_matrix(cm)
-    writer.add_scalar('val/f1', scores['f1'], cur_epoch)
-    writer.add_scalar('val/precision', scores['precision'], cur_epoch)
-    writer.add_scalar('val/recall', scores['recall'], cur_epoch)
-    writer.add_scalar('val/loss', running_loss / len(loader.dataset), cur_epoch)
-    print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+    scores['loss'] = running_loss / len(loader.dataset)
+    nn_utils.write_scores(writer, 'val', scores, cur_epoch)
 
     crop_res = majority_dict.get_predictions_and_labels()
     labels, preds = crop_res['labels'], crop_res['predictions']
@@ -190,13 +186,6 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     f1_video, recall_video, precision_video = f1_score(labels, preds), recall_score(labels, preds), precision_score(labels, preds)
     print(f'Validation scores (all 5 crops):\n F1: {f1_video},\n Precision: {precision_video},\n Recall: {recall_video}')
     writer.add_scalar('val/crof1', f1_video, cur_epoch)
-
-    '''if calc_roc:
-        roc_data = majority_dict.get_roc_data()
-        roc_scores = {}
-        for i, d in enumerate(roc_data):
-            roc_scores[i] = f1_score(d['labels'], d['predictions'])
-        writer.add_scalars('val/f1_roc', roc_scores)'''
 
     return running_loss / len(loader.dataset), scores['f1']
 
