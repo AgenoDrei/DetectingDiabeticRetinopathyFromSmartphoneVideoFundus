@@ -11,7 +11,7 @@ from os.path import join
 from tqdm import tqdm
 
 
-def run(data_path, model_path, gpu_name, bs):
+def run(data_path, labels_path, model_path, gpu_name, bs):
     image_size = 450
     crop_size = 399
     aug_pipeline = alb.Compose([
@@ -22,9 +22,9 @@ def run(data_path, model_path, gpu_name, bs):
     ], p=1.0)
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     net = prepare_model(model_path, device)
-    data_loader = prepare_dataset(data_path, aug_pipeline, bs)
+    data_loader, labels_df = prepare_dataset(data_path, labels_path, aug_pipeline, bs)
 
-    make_predictions(net, data_loader, device)
+    make_predictions(net, data_loader, device, labels_df)
 
 
 def prepare_model(model_path, device):
@@ -36,30 +36,48 @@ def prepare_model(model_path, device):
     return stump
 
 
-def prepare_dataset(data_path, aug_pipeline, bs):
-    dataset = nn_utils.RetinaDataset(join(data_path, 'labels_train_frames.csv'), data_path, augmentations=aug_pipeline, file_type='.png')
+def prepare_dataset(data_path, labels_path, aug_pipeline, bs):
+    dataset = nn_utils.RetinaDataset(labels_path, data_path, augmentations=aug_pipeline, file_type='', use_prefix=True)
     loader = data.DataLoader(dataset, batch_size=bs, shuffle=False, num_workers=16)
+    df = dataset.labels_df
     print(f'Dataset size: {len(dataset)}')
-    return loader
+    return loader, df
 
 
-def make_predictions(model, loader, device):
+def make_predictions(model, loader, device, labels_df):
     model.eval()
+    model.to(device)
     cm = torch.zeros(2, 2)
+    predictions = {}
+    probabilites = {}
+    sm = torch.nn.Softmax(dim=1)
 
     for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
+        names = batch['name']
 
         with torch.no_grad():
             outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
+            probs = sm(outputs)
 
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
+        for i in range(len(names)):
+            predictions[names[i]] = preds.tolist()[i]
+            probabilites[names[i]] = probs[i][preds.tolist()[i]]
+
     scores = nn_utils.calc_scores_from_confusion_matrix(cm)
     print(f'Scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+    for row in labels_df.itertuples():
+        labels_df.loc[row.Index, 'prediction'] = int(predictions[row.image])
+        labels_df.loc[row.Index, 'probability'] = int(probabilites[row.image])
+
+    labels_df['prediction'] = labels_df['prediction'].astype(int)
+    labels_df['probability'] = labels_df['probability'].astype(float)
+    labels_df.to_csv('labels_train_weak.csv', index=False)
 
 
 if __name__ == '__main__':
@@ -67,12 +85,12 @@ if __name__ == '__main__':
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
     parser = argparse.ArgumentParser(description='Make predictions with trained model')
-    parser.add_argument('--data', help='Path for training data', type=str)
+    parser.add_argument('--data', help='Path to data folder', type=str)
     parser.add_argument('--model', help='Path for the base model', type=str)
-    parser.add_argument('--labels', help='Output file for modified labels', type=str)
+    parser.add_argument('--labels', help='Path for the label csv', type=str)
     parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')
     parser.add_argument('--bs', help='Batch size for training', type=int, default=8)
     args = parser.parse_args()
 
-    run(args.data, args.model, args.gpu, args.bs)
+    run(args.data, args.labels, args.model, args.gpu, args.bs)
     sys.exit(0)

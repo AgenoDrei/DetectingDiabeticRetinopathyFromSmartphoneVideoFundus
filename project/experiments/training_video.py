@@ -192,7 +192,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     # print(majority_dict)
     #   print(labels, preds)
     video_scores = {'f1': f1_score(labels, preds), 'recall': recall_score(labels, preds), 'precision': precision_score(labels, preds)}
-    write_scores(writer, 'val_eye', video_scores, cur_epoch)
+    write_scores(writer, 'eval', video_scores, cur_epoch)
 
     if calc_roc: write_f1_curve(majority_dict, writer)
 

@@ -11,7 +11,9 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from custom_inceptionv4 import my_inceptionv4
+from multichannel_inceptionv4 import my_inceptionv4
+from narrow_inceptionv import NarrowInceptionV1
+from nn_processing import ThresholdGlare
 from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
     MultiChannelRetinaDataset, write_scores, write_f1_curve
 from torch.optim import lr_scheduler
@@ -31,23 +33,29 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(base_path)),
         'learning_rate': 1e-4,
-        'weight_decay': 1e-4,
+        'weight_decay': 3e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'freeze': 0.0,
-        'balance': 0.45,
+        'freeze': 0.2,
+        'balance': 0.5,
         'image_size': 450,
         'crop_size': 399,
         'pretraining': True,
         'preprocessing': False,
-        'multi_channel': False
+        'multi_channel': False,
+        'boosting': 2.00,
+        'use_clahe': False,
+        'narrow_model': False,
+        'remove_glare': True
     }
     aug_pipeline_train = A.Compose([
+        A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
+        ThresholdGlare(always_apply=hyperparameter['remove_glare'], p=1.0 if hyperparameter['remove_glare'] else 0.0),
         A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
         A.RandomCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         A.HorizontalFlip(p=0.5),
-        A.CoarseDropout(min_holes=1, max_holes=4, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
+        A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
         A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
         A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
         A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.3),
@@ -57,12 +65,13 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
     aug_pipeline_val = A.Compose([
+        A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
+        ThresholdGlare(always_apply=hyperparameter['remove_glare'], p=1.0 if hyperparameter['remove_glare'] else 0.0),
         A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
         A.CenterCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         A.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
-
 
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
@@ -77,15 +86,26 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
     desc = f'_paxos_frames_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
-    train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
+    best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
+
+    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_model(model_path, hp, device):
     # stump = models.alexnet(pretrained=True)
-    stump = ptm.inceptionv4() if not hp['multi_channel'] else my_inceptionv4(pretrained=False)
+    stump = None
+    if hp['multi_channel']:
+        stump = my_inceptionv4(pretrained=False)
+        hp['pretraining'] = False
+    elif hp['narrow_model']:
+        stump = NarrowInceptionV1(num_classes=2)
+        hp['pretraining'] = False
+    else:
+        stump = ptm.inceptionv4()
+        num_ftrs = stump.last_linear.in_features
+        stump.last_linear = nn.Linear(num_ftrs, 2)
 
-    num_ftrs = stump.last_linear.in_features
-    stump.last_linear = nn.Linear(num_ftrs, 2)
+
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
@@ -96,6 +116,7 @@ def prepare_model(model_path, hp, device):
             for param in child.parameters():
                 param.requires_grad = False
             dfs_freeze(child)
+    stump.to(device)
     return stump
 
 
@@ -103,7 +124,7 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     if not hp['multi_channel']:
         train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_train,
-                                      balance_ratio=hp['balance'], file_type='', use_prefix=True)
+                                      balance_ratio=hp['balance'], file_type='', use_prefix=True, boost_frames=hp['boosting'])
         val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_val, file_type='',
                                     use_prefix=True)
     else:
@@ -123,7 +144,7 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val):
 def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50, description='Vanilla'):
     since = time.time()
     best_f1_val = -1
-    model.to(device)
+    best_model_path = None
 
     for epoch in range(num_epochs):
         print(f'{time.strftime("%H:%M:%S")}> Epoch {epoch}/{num_epochs}')
@@ -158,18 +179,15 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'best_paxos_frames_model_{val_f1:0.2}.pth')
-
-        # best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
+            torch.save(model.state_dict(), f'{time.strftime("%Y%M%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
+            best_model_path = f'{time.strftime("%Y%M%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
 
         scheduler.step(val_loss)
 
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
-    validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
-    # torch.save(model.state_dict(), f'model{description}')
-    return model
+    return best_model_path
 
 
 def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
@@ -198,19 +216,19 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     scores['loss'] = running_loss / len(loader.dataset)
     write_scores(writer, 'val', scores, cur_epoch)
 
-    votings = majority_dict.get_predictions_and_labels()
-    preds, labels = votings['predictions'], votings['labels']
-    write_scores(writer, 'eye_val', {'f1': f1_score(labels, preds), 'precision': precision_score(labels, preds),
-                                     'recall': recall_score(labels, preds)}, cur_epoch)
+    v = majority_dict.get_predictions_and_labels()
+    eye_scores = {'precision': precision_score(v['labels'], v['predictions']),
+                  'recall': recall_score(v['labels'], v['predictions']),
+                  'f1': f1_score(v['labels'], v['predictions'])}
+    write_scores(writer, 'eval', eye_scores, cur_epoch)
 
     if calc_roc: write_f1_curve(majority_dict, writer)
 
-    return running_loss / len(loader.dataset), scores['f1']
+    return running_loss / len(loader.dataset), eye_scores['f1']
 
 
 if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
-    print(f'INFO> Using opencv version {cv2.__version__}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
     parser = argparse.ArgumentParser(description='Train your eyes out')
