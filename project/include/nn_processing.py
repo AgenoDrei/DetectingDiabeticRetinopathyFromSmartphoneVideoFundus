@@ -7,6 +7,7 @@ import torch
 import utils as utl
 from albumentations import DualTransform
 from joblib import Parallel, delayed
+from skimage import exposure, morphology, img_as_ubyte, img_as_float
 
 
 class CenterCrop(object):
@@ -138,6 +139,33 @@ class RandomFiveCrop(DualTransform):
 
     def get_transform_init_args_names(self):
         return 'height', 'width'
+
+    def get_params_dependent_on_targets(self, params):
+        pass
+
+
+class ThresholdGlare(DualTransform):
+    def __init__(self, always_apply=True, p=1, thresh=0.85):
+        super().__init__(always_apply, p)
+        self.thresh = thresh
+
+    def apply_to_bbox(self, bbox, **params):
+        return bbox
+
+    def apply_to_keypoint(self, keypoint, **params):
+        return keypoint
+
+    def apply(self, img, **params):
+        img2 = utl.enhance_contrast_image(img)
+        img2 = img2[:, :, 1]
+
+        mask = img2 > self.thresh
+        mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3)))
+
+        return cv2.inpaint(img, np.int(mask), 3, cv2.INPAINT_TELEA)
+
+    def get_transform_init_args_names(self):
+        return 'thresh'
 
     def get_params_dependent_on_targets(self, params):
         pass

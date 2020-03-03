@@ -3,13 +3,15 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import time_wrap as tw
+from mpl_toolkits.axes_grid1 import ImageGrid
 
 ####################################
 ######### HELPER METHODS ###########
 ####################################
+from skimage import exposure
 
 
-def load_images(path: str = './C001R_Cut', img_type:str = 'jpg') -> list:
+def load_images(path: str = './C001R_Cut', img_type: str = 'jpg') -> list:
     frames = []
     paths = [f for f in os.listdir(path) if f.endswith(img_type)]
     print(f'UTIL> Found {len(paths)} frames in folder {path}: {paths}')
@@ -38,15 +40,15 @@ def show_image(data: np.ndarray, name: str = 'Single Image', w: int = 1200, h: i
     cv2.destroyAllWindows()
 
 
-def show_image_row(data:list, name: str = 'Image stack', time: int = 0) -> None:
-    max_height:int = 0
+def show_image_row(data: list, name: str = 'Image stack', time: int = 0) -> None:
+    max_height: int = 0
     acc_width: int = 0
     for img in data:
         max_height = img.shape[0] if img.shape[0] > max_height else max_height
         acc_width += img.shape[1]
 
     conc_img = np.zeros(shape=[max_height, acc_width, 3], dtype=np.uint8)
-    dups =  []
+    dups = []
     for img in data:
         delta_height = max_height - img.shape[0]
         top, bottom = delta_height // 2, delta_height - (delta_height // 2)
@@ -57,11 +59,11 @@ def show_image_row(data:list, name: str = 'Image stack', time: int = 0) -> None:
     show_image(image_row, name=name, h=max_height, w=1600, time=time)
 
 
-def print_progress_bar (iteration, total, prefix ='', suffix ='', decimals = 1, length = 100, fill ='█'):
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█'):
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filledLength = int(length * iteration // total)
     bar = fill * filledLength + '-' * (length - filledLength)
-    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end='\r')
     # Print New Line on Complete
     if iteration == total:
         print()
@@ -72,6 +74,7 @@ def float2gray(img: np.array) -> np.array:
 
 
 def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
+    pref_size = (int(pref_size[0]), int(pref_size[1]))
     if pref_size[0] == img.shape[0] and pref_size[1] == img.shape[1]:
         return img
 
@@ -79,7 +82,7 @@ def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
     vertical_pad = (pref_size[0] - img.shape[0]) // 2
 
     padded_img = np.zeros((pref_size[0], pref_size[1], 3))
-    padded_img[vertical_pad:vertical_pad+img.shape[0], horizontal_pad:horizontal_pad+img.shape[1]] = img
+    padded_img[vertical_pad:vertical_pad + img.shape[0], horizontal_pad:horizontal_pad + img.shape[1]] = img
 
     # padded_img = np.pad(img, [(vertical_pad, vertical_pad), (horizontal_pad, horizontal_pad)], mode='constant')
     # if padded_img.shape[0] < pref_size[0]:
@@ -87,12 +90,12 @@ def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
     # elif padded_img.shape[1] < pref_size[1]:
     #     padded_img = np.pad(padded_img, [(0, 0), (0, 1)], mode='constant')
 
-    #print(f'UTILS> Pref: {pref_size}, Padded: {padded_img.shape}')
+    # print(f'UTILS> Pref: {pref_size}, Padded: {padded_img.shape}')
     return padded_img
 
 
 ################### Image functions ##################
-def get_retina_mask(img:np.ndarray, radius_reduction: int = 20, hough_param:int = 75) -> (np.ndarray, tuple):
+def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75) -> (np.ndarray, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
@@ -127,12 +130,12 @@ def get_retina_mask(img:np.ndarray, radius_reduction: int = 20, hough_param:int 
         return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
 
 
-def enhance_contrast_image(img:np.ndarray, clip_limit: float = 3.0, tile_size: int = 8) -> np.ndarray:
+def enhance_contrast_image(img: np.ndarray, clip_limit: float = 3.0, tile_size: int = 8) -> np.ndarray:
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
     cl = clahe.apply(l)
-    #cl = cv2.equalizeHist(l)
+    # cl = cv2.equalizeHist(l)
     ca = clahe.apply(a)
     cb = clahe.apply(b)
 
@@ -155,7 +158,7 @@ def show_means(means: np.ndarray, weights) -> None:
         progress += weights[0, i] * 100 * means.shape[0]
 
     show_strip = np.uint8(show_strip)
-    #print(show_strip.shape)
+    # print(show_strip.shape)
     show_image(cv2.cvtColor(show_strip, cv2.COLOR_HSV2BGR))
 
 
@@ -194,6 +197,21 @@ def do_five_crop(img: np.ndarray, height: int, width: int, state: int = 0) -> np
     return img[top:top + height, left:left + width]
 
 
+def draw_image_grid(images: list, clahe=False) -> None:
+    if clahe:
+        [exposure.equalize_adapthist(s, clip_limit=0.02) for s in images]
+    size = int(np.ceil(np.sqrt(len(images))))
+    fig = plt.figure(figsize=(20., 20.))
+    grid = ImageGrid(fig, 111, nrows_ncols=(size, size), axes_pad=0.1)
+
+    for ax, im in zip(grid, images):
+        ax.set_axis_off()
+        ax.imshow(im)
+    plt.axis('off')
+    plt.show()
+    plt.close(fig)
+
+
 ########################## Video functions ###############################
 
 @tw.profile
@@ -207,14 +225,14 @@ def extract_video_frames(image_path: str, output_path: str, frames_per_second: i
     frame_count = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
     prev = -1
     print(f'SNIP> Extracting {frame_count // fps * frames_per_second} frames from {image_path}')
-    while count <= 5000:                                    # Max video size
+    while count <= 5000:  # Max video size
         grabbed = vidcap.grab()
         if grabbed:
             time_s = vidcap.get(cv2.CAP_PROP_POS_MSEC) // time_between_frames
             if time_s > prev:
                 cv2.imwrite(os.path.join(output_path, f'{os.path.splitext(os.path.basename(image_path))[0]}_{int(time_s):02d}.png'), vidcap.retrieve()[1])
                 count += 1
-                #frames.append(vidcap.retrieve()[1])
+                # frames.append(vidcap.retrieve()[1])
                 prev = time_s
         else:
             break

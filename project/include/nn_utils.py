@@ -15,15 +15,18 @@ import nn_processing
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False, boost_frames=1.0):
         """
-        Args:
-            csv_file (string): Path to the csv file with annotations.
-            root_dir (string): Directory with all the images.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
+        Retina Dataset for normal single frame data samples
+        :param csv_file: path to csv file with labels
+        :param root_dir: path to folder with sample images
+        :param file_type: file ending of images (e.g '.jpg')
+        :param balance_ratio: adjust sample weight in case of unbalanced classes
+        :param transform: pytorch data augmentation
+        :param augmentations: albumentation data augmentation
+        :param use_prefix: data folder contains subfolders for classes (pos / neg)
+        :param boost_frames: boost frames if a third weak prediciton column is available
         """
-        assert transform is None or augmentations is None
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.file_type = file_type
@@ -31,6 +34,9 @@ class RetinaDataset(Dataset):
         self.augs = augmentations
         self.ratio = balance_ratio
         self.use_prefix = use_prefix
+        self.boost = boost_frames
+        assert transform is None or augmentations is None
+        assert (boost_frames > 1.0 and len(self.labels_df.columns) == 3) or boost_frames == 1.0
 
     def __len__(self):
         return len(self.labels_df)
@@ -39,7 +45,10 @@ class RetinaDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         severity = self.labels_df.iloc[idx, 1]
-        return self.ratio if severity == 0 else 1.0
+        weight = self.ratio if severity == 0 else 1.0
+        if self.boost > 1.0 and severity == 1 and self.labels_df.iloc[idx, 2] == 1:
+            weight *= self.boost
+        return weight
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
@@ -53,9 +62,10 @@ class RetinaDataset(Dataset):
             prefix = ''
         img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
         img = cv2.imread(img_name)
+        assert img is not None, f'Image {img_name} has to exist'
         # image = image[:,:,[2, 1, 0]]
 
-        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
+        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id'], 'name': self.labels_df.iloc[idx, 0]}
         if self.transform:
             sample['image'] = img[:, :, [2, 1, 0]]
             sample['image'] = self.transform(sample['image'])
@@ -317,7 +327,7 @@ def write_scores(writer, tag: str, scores: dict, cur_epoch: int):
     writer.add_scalar(f'{tag}/precision', scores['precision'], cur_epoch)
     writer.add_scalar(f'{tag}/recall', scores['recall'], cur_epoch)
     if scores.get('loss'): writer.add_scalar(f'{tag}/loss', scores['loss'], cur_epoch)
-    print(f'Validation scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+    print(f'{tag[0].upper()}{tag[1:]} scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
 
 
 class MajorityDict:
