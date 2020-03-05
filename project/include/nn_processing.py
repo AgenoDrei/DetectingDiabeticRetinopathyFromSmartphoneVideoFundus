@@ -160,9 +160,9 @@ class ThresholdGlare(DualTransform):
         img2 = img2[:, :, 1]
 
         mask = img2 > self.thresh
-        mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3)))
+        mask = cv2.dilate(img_as_ubyte(mask), cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3)))
 
-        return cv2.inpaint(img, np.int(mask), 3, cv2.INPAINT_TELEA)
+        return cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
 
     def get_transform_init_args_names(self):
         return 'thresh'
