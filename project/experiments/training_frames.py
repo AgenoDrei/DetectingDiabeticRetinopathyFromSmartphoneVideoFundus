@@ -15,7 +15,7 @@ from multichannel_inceptionv4 import my_inceptionv4
 from narrow_inceptionv import NarrowInceptionV1
 from nn_processing import ThresholdGlare
 from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
-    MultiChannelRetinaDataset, write_scores, write_f1_curve
+    MultiChannelRetinaDataset, write_scores, write_f1_curve, write_pr_curve
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -37,8 +37,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'freeze': 0.2,
-        'balance': 0.5,
+        'freeze': 0.5,
+        'balance': 0.45,
         'image_size': 450,
         'crop_size': 399,
         'pretraining': True,
@@ -47,7 +47,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'boosting': 2.00,
         'use_clahe': False,
         'narrow_model': False,
-        'remove_glare': True
+        'remove_glare': False
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -179,8 +179,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'{time.strftime("%Y%M%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
-            best_model_path = f'{time.strftime("%Y%M%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
+            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
+            best_model_path = f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
 
         scheduler.step(val_loss)
 
@@ -214,15 +214,17 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
 
     scores = calc_scores_from_confusion_matrix(cm)
     scores['loss'] = running_loss / len(loader.dataset)
-    write_scores(writer, 'val', scores, cur_epoch)
+    if not calc_roc: write_scores(writer, 'val', scores, cur_epoch)
 
     v = majority_dict.get_predictions_and_labels()
     eye_scores = {'precision': precision_score(v['labels'], v['predictions']),
                   'recall': recall_score(v['labels'], v['predictions']),
                   'f1': f1_score(v['labels'], v['predictions'])}
-    write_scores(writer, 'eval', eye_scores, cur_epoch)
+    if not calc_roc: write_scores(writer, 'eval', eye_scores, cur_epoch)
 
-    if calc_roc: write_f1_curve(majority_dict, writer)
+    if calc_roc:
+        write_f1_curve(majority_dict, writer)
+        write_pr_curve(majority_dict, writer)
 
     return running_loss / len(loader.dataset), eye_scores['f1']
 

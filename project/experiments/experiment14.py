@@ -9,6 +9,7 @@ from torch import nn
 from torch.utils import data
 from os.path import join
 from tqdm import tqdm
+import pandas as pd
 
 
 def run(data_path, labels_path, model_path, gpu_name, bs):
@@ -24,7 +25,8 @@ def run(data_path, labels_path, model_path, gpu_name, bs):
     net = prepare_model(model_path, device)
     data_loader, labels_df = prepare_dataset(data_path, labels_path, aug_pipeline, bs)
 
-    make_predictions(net, data_loader, device, labels_df)
+    prefix = 'train' if 'train' in labels_path else 'val'
+    make_predictions(net, data_loader, device, labels_df, prefix)
 
 
 def prepare_model(model_path, device):
@@ -44,18 +46,20 @@ def prepare_dataset(data_path, labels_path, aug_pipeline, bs):
     return loader, df
 
 
-def make_predictions(model, loader, device, labels_df):
+def make_predictions(model, loader, device, labels_df, prefix):
     model.eval()
     model.to(device)
     cm = torch.zeros(2, 2)
     predictions = {}
-    probabilites = {}
+    probabilities = {}
     sm = torch.nn.Softmax(dim=1)
+    mdict = nn_utils.MajorityDict()
 
     for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         names = batch['name']
+        eye_ids = batch['eye_id']
 
         with torch.no_grad():
             outputs = model(inputs)
@@ -67,17 +71,23 @@ def make_predictions(model, loader, device, labels_df):
 
         for i in range(len(names)):
             predictions[names[i]] = preds.tolist()[i]
-            probabilites[names[i]] = probs[i][preds.tolist()[i]]
+            probabilities[names[i]] = probs[i].tolist()[int(preds.tolist()[i])]
+
+        mdict.add(preds.tolist(), labels, eye_ids)
 
     scores = nn_utils.calc_scores_from_confusion_matrix(cm)
     print(f'Scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
     for row in labels_df.itertuples():
         labels_df.loc[row.Index, 'prediction'] = int(predictions[row.image])
-        labels_df.loc[row.Index, 'probability'] = int(probabilites[row.image])
+        labels_df.loc[row.Index, 'probability'] = float(probabilities[row.image])
 
     labels_df['prediction'] = labels_df['prediction'].astype(int)
     labels_df['probability'] = labels_df['probability'].astype(float)
-    labels_df.to_csv('labels_train_weak.csv', index=False)
+    labels_df.to_csv(f'labels_{prefix}_weak.csv', index=False)
+
+    eye_res = mdict.get_predictions_and_labels()
+    eye_labels = pd.DataFrame(eye_res)
+    eye_labels.to_csv(f'labels_{prefix}_eyes.csv', index=False)
 
 
 if __name__ == '__main__':

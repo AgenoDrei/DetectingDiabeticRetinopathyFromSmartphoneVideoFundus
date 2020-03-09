@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 import torch
 import numpy as np
 import pandas as pd
@@ -6,9 +8,10 @@ import cv2
 import os
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, precision_score, recall_score, auc, accuracy_score, cohen_kappa_score
 from torch import nn
 from torch.utils.data import Dataset
+from torch.utils.tensorboard import SummaryWriter
 from torchvision import utils
 import utils as utl
 import nn_processing
@@ -36,7 +39,7 @@ class RetinaDataset(Dataset):
         self.use_prefix = use_prefix
         self.boost = boost_frames
         assert transform is None or augmentations is None
-        assert (boost_frames > 1.0 and len(self.labels_df.columns) == 3) or boost_frames == 1.0
+        assert (boost_frames > 1.0 and len(self.labels_df.columns) > 2) or boost_frames == 1.0
 
     def __len__(self):
         return len(self.labels_df)
@@ -47,7 +50,7 @@ class RetinaDataset(Dataset):
         severity = self.labels_df.iloc[idx, 1]
         weight = self.ratio if severity == 0 else 1.0
         if self.boost > 1.0 and severity == 1 and self.labels_df.iloc[idx, 2] == 1:
-            weight *= self.boost
+            weight *= (1. + self.labels_df.iloc[idx, 3])
         return weight
 
     def __getitem__(self, idx):
@@ -322,11 +325,30 @@ def write_f1_curve(majority_dict, writer):
         print(f'{key}: {val}', end=', ')
 
 
-def write_scores(writer, tag: str, scores: dict, cur_epoch: int):
+def write_pr_curve(majority_dict, writer: SummaryWriter):
+    roc_data = majority_dict.get_roc_data()
+    pr_scores = []
+    for i, d in enumerate(roc_data.values()):
+        pr_scores.append((precision_score(d['labels'], d['predictions']), recall_score(d['labels'], d['predictions'])))
+
+    pr_scores = sorted(pr_scores, key=lambda pr: pr[1])
+
+    print('PR Curve (Recall: Precision): ', end='')
+    for prec, rec in pr_scores:
+        # writer.add_scalar('val/pr', rec, prec)
+        print(f' {rec}: {prec}')
+    print('PR curve auc: ', auc([r for p, r in pr_scores], [p for p, r in pr_scores]))
+    fig = plt.figure()
+
+
+def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bool = False):
     writer.add_scalar(f'{tag}/f1', scores['f1'], cur_epoch)
     writer.add_scalar(f'{tag}/precision', scores['precision'], cur_epoch)
     writer.add_scalar(f'{tag}/recall', scores['recall'], cur_epoch)
     if scores.get('loss'): writer.add_scalar(f'{tag}/loss', scores['loss'], cur_epoch)
+    if full_report:
+        writer.add_scalar(f'{tag}/kappa', scores['kappa'], cur_epoch)
+        writer.add_scalar(f'{tag}/accuracy', scores['accuracy'], cur_epoch)
     print(f'{tag[0].upper()}{tag[1:]} scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
 
 
@@ -354,16 +376,17 @@ class MajorityDict:
         """
         Do majority voting to get final predicions aggregated over all elements sharing the same key
         :param ratio: Used to shange majority percentage (default 50/50)
-        :return: dict(predictions, labels)
+        :return: dict(predictions, labels, names)
         """
-        labels, preds = [], []
+        labels, preds, names = [], [], []
         for i, item in self.dict.items():
             if item['1'] > ratio * (item['0'] + item['1']):
                 preds.append(1)
             else:
                 preds.append(0)
             labels.append(item['label'])
-        return {'predictions': preds, 'labels': labels}
+            names.append(i)
+        return {'predictions': preds, 'labels': labels, 'names': names}
 
     def get_roc_data(self, step_size: float = 0.05):
         """
@@ -375,3 +398,24 @@ class MajorityDict:
         for i in np.arange(0, 1.001, step_size):
             roc_data[i] = self.get_predictions_and_labels(ratio=i)
         return roc_data
+
+
+Score = namedtuple('Score', ['f1', 'precision', 'recall', 'accuracy', 'kappa', 'loss'])
+
+
+class Scores:
+    def __init__(self):
+        self.predictions = []
+        self.labels = []
+        self.probabilities = []
+        self.tags = []
+
+    def add(self, preds: list, lables: list, probs: list = None, tags: list = None):
+        self.predictions.append(preds)
+        self.labels.append(lables)
+        if probs: self.probabilities.append(probs)
+        if tags: self.tags.append(tags)
+
+    def calc_scores(self, as_dict: bool = False):
+        score = Score(f1_score(self.labels, self.predictions), precision_score(self.labels, self.predictions), recall_score(self.labels, self.predictions), accuracy_score(self.labels, self.predictions), cohen_kappa_score(self.labels, self.predictions), 0)
+        return score._asdict() if as_dict else score

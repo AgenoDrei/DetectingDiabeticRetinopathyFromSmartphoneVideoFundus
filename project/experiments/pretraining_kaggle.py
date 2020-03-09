@@ -36,7 +36,7 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         'image_size': 450,
         'crop_size': 399,
         'freeze': 0.0,
-        'balance': 0.3,
+        'balance': 0.25,
         'preprocessing': False
     }
     aug_pipeline_train = alb.Compose([
@@ -48,7 +48,7 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         alb.OneOf([alb.GaussNoise(p=0.5), alb.ISONoise(p=0.5), alb.IAAAdditiveGaussianNoise(p=0.25), alb.MultiplicativeNoise(p=0.25)], p=0.3),
         alb.OneOf([alb.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), alb.GridDistortion(p=0.5)], p=0.25),
         alb.OneOf([alb.HueSaturationValue(p=0.5), alb.ToGray(p=0.5), alb.RGBShift(p=0.5)], p=0.3),
-        alb.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), alb.RandomGamma()], p=0.3),
+        alb.OneOf([RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2), alb.RandomGamma()], p=0.3),
         alb.Normalize(always_apply=True, p=1.0),
         ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
@@ -157,6 +157,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     cm = torch.zeros(2, 2)
     running_loss = 0.0
     majority_dict = nn_utils.MajorityDict()
+    perf_metrics = nn_utils.Scores()
 
     for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['image'].to(device, dtype=torch.float)
@@ -170,17 +171,12 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
             _, preds = torch.max(outputs, 1)
             running_loss += loss.item() * inputs.size(0)
 
-        for true, pred in zip(labels, preds):
-            cm[true, pred] += 1
-
         majority_dict.add(preds.tolist(), labels, crop_idx)
+        perf_metrics.add(preds.tolist(), labels, tags=crop_idx)
 
-    scores = nn_utils.calc_scores_from_confusion_matrix(cm)
+    scores = perf_metrics.calc_scores(as_dict=True)
     scores['loss'] = running_loss / len(loader.dataset)
-    nn_utils.write_scores(writer, 'val', scores, cur_epoch)
-
-    crop_res = majority_dict.get_predictions_and_labels()
-    labels, preds = crop_res['labels'], crop_res['predictions']
+    nn_utils.write_scores(writer, 'val', scores, cur_epoch, full_report=True)
 
     # print(majority_dict)
     # print(labels, preds)
