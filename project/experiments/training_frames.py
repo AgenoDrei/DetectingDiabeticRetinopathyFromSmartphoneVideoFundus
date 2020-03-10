@@ -37,7 +37,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'freeze': 0.5,
+        'freeze': 0.0,
         'balance': 0.45,
         'image_size': 450,
         'crop_size': 399,
@@ -104,7 +104,6 @@ def prepare_model(model_path, hp, device):
         stump = ptm.inceptionv4()
         num_ftrs = stump.last_linear.in_features
         stump.last_linear = nn.Linear(num_ftrs, 2)
-
 
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))

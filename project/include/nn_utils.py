@@ -8,7 +8,7 @@ import cv2
 import os
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
-from sklearn.metrics import f1_score, precision_score, recall_score, auc, accuracy_score, cohen_kappa_score
+from sklearn.metrics import f1_score, precision_score, recall_score, auc, accuracy_score, cohen_kappa_score, precision_recall_curve
 from torch import nn
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -326,19 +326,17 @@ def write_f1_curve(majority_dict, writer):
 
 
 def write_pr_curve(majority_dict, writer: SummaryWriter):
-    roc_data = majority_dict.get_roc_data()
-    pr_scores = []
-    for i, d in enumerate(roc_data.values()):
-        pr_scores.append((precision_score(d['labels'], d['predictions']), recall_score(d['labels'], d['predictions'])))
+    probs, labels, names = majority_dict.get_probabilities_and_labels().values()
+    precision, recall, thresholds = precision_recall_curve(labels, probs)
+    print('PR Curve (Recall: Precision): ')
+    for p, r in zip(precision, recall):
+        print(f' {r}: {p}')
 
-    pr_scores = sorted(pr_scores, key=lambda pr: pr[1])
-
-    print('PR Curve (Recall: Precision): ', end='')
-    for prec, rec in pr_scores:
-        # writer.add_scalar('val/pr', rec, prec)
-        print(f' {rec}: {prec}')
-    print('PR curve auc: ', auc([r for p, r in pr_scores], [p for p, r in pr_scores]))
     fig = plt.figure()
+    plt.plot(recall, precision)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    writer.add_figure('eval/pr', fig)
 
 
 def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bool = False):
@@ -371,6 +369,14 @@ class MajorityDict:
                 entry['count'] += 1
             else:
                 self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1, 'label': int(true)}
+
+    def get_probabilities_and_labels(self):
+        labels, probs, names = [], [], []
+        for i, item in self.dict.items():
+            probs.append(item['1'] / (item['1'] + item['0']))
+            labels.append(item['label'])
+            names.append(i)
+        return {'probabilities': probs, 'labels': labels, 'names': names}
 
     def get_predictions_and_labels(self, ratio: float = 0.5):
         """
@@ -411,10 +417,10 @@ class Scores:
         self.tags = []
 
     def add(self, preds: list, lables: list, probs: list = None, tags: list = None):
-        self.predictions.append(preds)
-        self.labels.append(lables)
-        if probs: self.probabilities.append(probs)
-        if tags: self.tags.append(tags)
+        self.predictions.extend(preds)
+        self.labels.extend(lables)
+        if probs: self.probabilities.extend(probs)
+        if tags: self.tags.extend(tags)
 
     def calc_scores(self, as_dict: bool = False):
         score = Score(f1_score(self.labels, self.predictions), precision_score(self.labels, self.predictions), recall_score(self.labels, self.predictions), accuracy_score(self.labels, self.predictions), cohen_kappa_score(self.labels, self.predictions), 0)

@@ -172,7 +172,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
             running_loss += loss.item() * inputs.size(0)
 
         majority_dict.add(preds.tolist(), labels, crop_idx)
-        perf_metrics.add(preds.tolist(), labels, tags=crop_idx)
+        perf_metrics.add(preds.tolist(), labels.tolist(), tags=crop_idx)
 
     scores = perf_metrics.calc_scores(as_dict=True)
     scores['loss'] = running_loss / len(loader.dataset)
