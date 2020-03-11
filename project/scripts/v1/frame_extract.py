@@ -6,14 +6,14 @@ from joblib import Parallel, delayed
 import utils as utl
 
 
-def run(input_path, output_path, time_between_frames):
+def run(input_path, output_path, fps):
     all_files = list(Path(input_path).rglob('*.MOV'))
     name_pattern = re.compile(r"([A-Z])(\d){3}[RL](\d)?")
     paths = [str(f.absolute()) for f in all_files if name_pattern.search(str(f)) is not None]
 
     print(f'EXTRACT> Found {len(paths)} videos in folder {input_path}: {paths}')
 
-    Parallel(n_jobs=-1)(delayed(utl.extract_video_frames)(p, output_path, frames_per_second=10 // time_between_frames) for p in paths)
+    Parallel(n_jobs=-1)(delayed(utl.extract_video_frames)(p, output_path, frames_per_second=fps) for p in paths)
     return output_path
 
 

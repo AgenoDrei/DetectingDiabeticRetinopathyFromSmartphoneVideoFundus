@@ -33,7 +33,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(base_path)),
         'learning_rate': 1e-4,
-        'weight_decay': 3e-4,
+        'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
@@ -44,7 +44,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'pretraining': True,
         'preprocessing': False,
         'multi_channel': False,
-        'boosting': 2.00,
+        'boosting': 1.00,
         'use_clahe': False,
         'narrow_model': False,
         'remove_glare': False

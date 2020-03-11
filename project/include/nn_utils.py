@@ -332,11 +332,12 @@ def write_pr_curve(majority_dict, writer: SummaryWriter):
     for p, r in zip(precision, recall):
         print(f' {r}: {p}')
 
-    fig = plt.figure()
-    plt.plot(recall, precision)
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.0])
-    writer.add_figure('eval/pr', fig)
+    writer.add_pr_curve('eval/pr', labels, probs, 0)
+    #fig = plt.figure()
+    #plt.plot(recall, precision)
+    #plt.xlim([0.0, 1.0])
+    #plt.ylim([0.0, 1.0])
+    #writer.add_figure('eval/pr', fig)
 
 
 def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bool = False):

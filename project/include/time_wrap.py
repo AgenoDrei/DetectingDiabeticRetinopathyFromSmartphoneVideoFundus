@@ -13,7 +13,7 @@ def profile(fn):
 
         elapsed_time = time.monotonic() - start_time
 
-        print(f'WRAP> Function {fn.__name__} needed {elapsed_time:.2f} seconds to execute!')
+        print(f'WRAP> Function {fn.__name__} with args {args} needed {elapsed_time:.2f} seconds to execute!')
         return ret
 
     return with_profiling
