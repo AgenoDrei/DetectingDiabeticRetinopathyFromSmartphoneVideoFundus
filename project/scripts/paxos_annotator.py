@@ -13,6 +13,9 @@ OUTPUT_NAME = 'annotated_frames.csv'
 def run(input_path, labels_path, mode=None):
     df_labels: pd.DataFrame = pd.read_csv(input_path)
     df_labels = df_labels.loc[df_labels.loc['level' != 0]]
+    change_list = []
+    
+    print(f'INFO> Manual annotation of {len(df_labels)} frames starting...')
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW_NAME, WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -25,17 +28,19 @@ def run(input_path, labels_path, mode=None):
         print(key_code)
 
         new_class = 0
-        if key_code == 48:
+        if key_code == 110:         # key-code 110 => n
             new_class = 0
-        elif key_code == 49:
+        elif key_code == 100:       # key-code 100 => d
             new_class = 1
 
         if new_class != row.level:
-            df_labels.iloc[row.Index, 'level'] = new_class
+            df_labels.loc[row.Index, 'level'] = new_class
+            change_list.append((row.image, row.level, new_class))
 
     cv2.destroyAllWindows()
     df_labels.to_csv(os.path.join(input_path, OUTPUT_NAME))
-
+    print(f'INFO> Manual annotation finished. {len(change_list)} rows affected.')
+    print(change_list)
 
 
 if __name__ == '__main__':
