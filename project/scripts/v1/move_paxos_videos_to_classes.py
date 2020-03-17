@@ -10,7 +10,7 @@ from pathlib import Path
 from shutil import copy
 
 
-def run(input_path, output_path, labels_path, ignore_files=False):
+def run(input_path, output_path, labels_path, ignore_files=False, file_type='.MOV'):
     """
     Split paxos dataset into positive/negative videos and create simpler CSV file usable for training
     :param input_path: Absolute path to paxos adapter video files
@@ -19,7 +19,7 @@ def run(input_path, output_path, labels_path, ignore_files=False):
     :return:
     """
     name_pattern = re.compile(r"([A-Z])(\d){3}[RL](\d)?")
-    all_files = list(Path(input_path).rglob('*.jpg'))
+    all_files = list(Path(input_path).rglob(f'*{file_type}'))
     filtered_files = [str(f.absolute()) for f in all_files if name_pattern.search(str(f)) is not None]
 
     df = pd.read_excel(labels_path, sheet_name='Paxos 4.7')
@@ -54,6 +54,7 @@ if __name__ == '__main__':
     a.add_argument("--labels", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")
     a.add_argument("--ignore_files", help="Do not move video files, just recreate csv", default=False, type=bool)
+    a.add_argument("--type", help="File ending moved: .jpg/.png/.mov", default='.MOV', type=str)
     args = a.parse_args()
     print(args)
 
@@ -68,7 +69,7 @@ if __name__ == '__main__':
         os.mkdir(join(args.output, 'pos'))
         os.mkdir(join(args.output, 'neg'))
 
-    run(args.input, args.output, args.labels, ignore_files=args.ignore_files)
+    run(args.input, args.output, args.labels, ignore_files=args.ignore_files, file_type=args.type)
 
 
 

@@ -32,7 +32,7 @@ def run(input, output, pipeline, fps, majority, mode='snippet'):
         print(f'EXT> Working on file {filename} now!')
 
         if mode == "snippet" or mode == "snippet_frames":
-            drs.run(str(filename), Path(WORKING_PATH), pipeline, fps, majority, only_frames=True if mode is "snippet_frames" else False)
+            drs.run(str(filename), Path(WORKING_PATH), pipeline, fps, majority, only_frames=True if mode == "snippet_frames" else False)
         elif mode == "frames":
             drf.run(filename, WORKING_PATH, pipeline)
 
