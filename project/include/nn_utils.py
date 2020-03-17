@@ -15,6 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import utils
 import utils as utl
 import nn_processing
+from collections import Counter
 
 
 class RetinaDataset(Dataset):
@@ -31,6 +32,7 @@ class RetinaDataset(Dataset):
         :param boost_frames: boost frames if a third weak prediciton column is available
         """
         self.labels_df = pd.read_csv(csv_file)
+        self.grade_count = Counter([get_video_desc(name)['eye_id'] for name in self.labels_df['image'].tolist()])
         self.root_dir = root_dir
         self.file_type = file_type
         self.transform = transform
@@ -49,6 +51,7 @@ class RetinaDataset(Dataset):
             idx = idx.tolist()
         severity = self.labels_df.iloc[idx, 1]
         weight = self.ratio if severity == 0 else 1.0
+        weight /= self.grade_count[get_video_desc(self.labels_df.iloc[idx, 0])['eye_id']] 
         if self.boost > 1.0 and severity == 1 and self.labels_df.iloc[idx, 2] == 1:
             weight *= (1. + self.labels_df.iloc[idx, 3])
         return weight
@@ -332,7 +335,9 @@ def write_pr_curve(majority_dict, writer: SummaryWriter):
     for p, r in zip(precision, recall):
         print(f' {r}: {p}')
 
-    writer.add_pr_curve('eval/pr', labels, probs, 0)
+    
+
+    #writer.add_pr_curve('eval/pr', labels, probs, 0)
     #fig = plt.figure()
     #plt.plot(recall, precision)
     #plt.xlim([0.0, 1.0])

@@ -70,7 +70,7 @@ class RepeatedTimer(object):
 if __name__ == '__main__':
     print(f'{time.strftime("%H:%M:%S")}> Gpu observer starting...')
     run()
-    rt = RepeatedTimer(60 * 5, run)
+    rt = RepeatedTimer(60 * 60, run)
     try:
         time.sleep(60 * 60 * 24 * 7)  # Run for one week
     finally:
