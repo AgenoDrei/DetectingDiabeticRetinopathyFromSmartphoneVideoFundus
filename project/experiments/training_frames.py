@@ -15,7 +15,7 @@ from multichannel_inceptionv4 import my_inceptionv4
 from narrow_inceptionv import NarrowInceptionV1
 from nn_processing import ThresholdGlare
 from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
-    MultiChannelRetinaDataset, write_scores, write_f1_curve, write_pr_curve
+    MultiChannelRetinaDataset, write_scores, write_f1_curve, write_pr_curve, KFoldDataset
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -47,7 +47,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'boosting': 1.00,
         'use_clahe': False,
         'narrow_model': False,
-        'remove_glare': False
+        'remove_glare': False,
+        'k-folds': 5
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -75,35 +76,41 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
-    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
-
-    net = prepare_model(model_path, hyperparameter, device)
-
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
-                              weight_decay=hyperparameter['weight_decay'])
-    criterion = nn.CrossEntropyLoss()
-    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
 
     desc = f'_paxos_frames_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
-    best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
 
-    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter['num_epochs'], calc_roc=True)
+    dataset = KFoldDataset(join(base_path, 'processed_labels_paxos.csv'), base_path, augmentations={'train': aug_pipeline_train, 'val': aug_pipeline_val},
+                           balance_ratio=hyperparameter['balance'], boost_frames=hyperparameter['boosting'], k_folds=hyperparameter['k-folds'])
+
+    agg_scores = []
+    for k in range(hyperparameter['k-folds']):
+        dataset.set_k(k)
+        loader = prepare_dataset(dataset, hyperparameter['batch_size'], mode='train')
+        val_loader = prepare_dataset(dataset, hyperparameter['batch_size'], mode='val')
+        dataset.set_train()
+
+        net = prepare_model(model_path, hyperparameter, device)
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
+                               weight_decay=hyperparameter['weight_decay'])
+        criterion = nn.CrossEntropyLoss()
+        plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=True)
+
+        best_model_path = train_model(net, criterion, optimizer, plateau_scheduler, loader, val_loader, device, writer, num_epochs=hyperparameter['num_epochs'],
+                                      description=desc, cur_k=k)
+        dataset.set_eval()
+        scores, eye_scores = validate(prepare_model(best_model_path, hyperparameter, device), criterion, val_loader, device, writer,
+                                      (k+1) * hyperparameter['num_epochs'], calc_roc=False)
+        agg_scores.append((scores['f1'], eye_scores['f1']))
+
+    print(agg_scores)
 
 
 def prepare_model(model_path, hp, device):
     # stump = models.alexnet(pretrained=True)
-    stump = None
-    if hp['multi_channel']:
-        stump = my_inceptionv4(pretrained=False)
-        hp['pretraining'] = False
-    elif hp['narrow_model']:
-        stump = NarrowInceptionV1(num_classes=2)
-        hp['pretraining'] = False
-    else:
-        stump = ptm.inceptionv4()
-        num_ftrs = stump.last_linear.in_features
-        stump.last_linear = nn.Linear(num_ftrs, 2)
+    stump = ptm.inceptionv4()
+    num_ftrs = stump.last_linear.in_features
+    stump.last_linear = nn.Linear(num_ftrs, 2)
 
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))
@@ -119,28 +126,20 @@ def prepare_model(model_path, hp, device):
     return stump
 
 
-def prepare_dataset(base_name: str, hp, aug_train, aug_val):
-    set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    if not hp['multi_channel']:
-        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_train,
-                                      balance_ratio=hp['balance'], file_type='', use_prefix=True, boost_frames=hp['boosting'])
-        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_val, file_type='',
-                                    use_prefix=True)
+def prepare_dataset(train_dataset, batch_size, mode='train'):
+    if mode is 'val':
+        train_dataset.set_eval()
     else:
-        train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_train,
-                                                  balance_ratio=hp['balance'], file_type='', use_prefix=True, processed_suffix='_pp')
-        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_val,
-                                                file_type='', use_prefix=True, processed_suffix='_pp')
+        train_dataset.set_train()
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=hp['batch_size'])
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=hp['batch_size'])
-    print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
-    return train_loader, val_loader
+    loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, sampler=sampler if mode is 'train' else None, num_workers=16)
+    print(f'Dataset size: {len(train_dataset)}')
+    return loader
 
 
-def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50, description='Vanilla'):
+def train_model(model, criterion, optimizer, scheduler, loader, val_loader, device, writer, num_epochs=50, description='Vanilla', cur_k=0):
     since = time.time()
     best_f1_val = -1
     best_model_path = None
@@ -151,9 +150,10 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         running_loss = 0.0
         cm = torch.zeros(2, 2)
+        loader.dataset.set_train()
 
         # Iterate over data.
-        for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
+        for i, batch in tqdm(enumerate(loader), total=len(loader), desc=f'Epoch {epoch}'):
             inputs = batch['image'].to(device, dtype=torch.float)
             labels = batch['label'].to(device)
 
@@ -172,16 +172,16 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
                 cm[int(true), int(pred)] += 1
 
         train_scores = calc_scores_from_confusion_matrix(cm)
-        train_scores['loss'] = running_loss / len(loaders[0].dataset)
-        write_scores(writer, 'train', train_scores, epoch)
-        val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
+        train_scores['loss'] = running_loss / len(loader.dataset)
+        write_scores(writer, 'train', train_scores, cur_k * num_epochs + epoch)
+        val_scores, val_scores_eyes = validate(model, criterion, val_loader, device, writer, cur_k * num_epochs + epoch)
 
-        if val_f1 > best_f1_val:
-            best_f1_val = val_f1
-            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
-            best_model_path = f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
+        if val_scores_eyes['f1'] > best_f1_val:
+            best_f1_val = val_scores_eyes['f1']
+            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_scores["f1"]:0.2}.pth')
+            best_model_path = f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_scores["f1"]:0.2}.pth'
 
-        scheduler.step(val_loss)
+        scheduler.step(val_scores['loss'])
 
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
@@ -189,13 +189,14 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     return best_model_path
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
+def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[dict, dict]:
+    loader.dataset.set_eval()
     model.eval()
     cm = torch.zeros(2, 2)
     running_loss = 0.0
     majority_dict = MajorityDict()
 
-    for i, batch in enumerate(loader):
+    for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['image'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         eye_ids = batch['eye_id']
@@ -225,7 +226,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
         write_f1_curve(majority_dict, writer)
         write_pr_curve(majority_dict, writer)
 
-    return running_loss / len(loader.dataset), eye_scores['f1']
+    return scores, eye_scores
 
 
 if __name__ == '__main__':

@@ -9,6 +9,7 @@ import os
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from sklearn.metrics import f1_score, precision_score, recall_score, auc, accuracy_score, cohen_kappa_score, precision_recall_curve
+from sklearn.model_selection import StratifiedShuffleSplit, StratifiedKFold
 from torch import nn
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -18,7 +19,7 @@ import nn_processing
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False, boost_frames=1.0):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False, boost_frames=1.0, occurence_balancing=False):
         """
         Retina Dataset for normal single frame data samples
         :param csv_file: path to csv file with labels
@@ -149,6 +150,72 @@ class FiveCropRetinaDataset(Dataset):
             sample['image'] = self.augs(image=img)['image']
         return sample
 
+
+class KFoldDataset(Dataset):
+    def __init__(self, csv_file, root_dir, k_folds=5, balance_ratio=1.0, augmentations=None, boost_frames=1.0):
+        self.labels_df = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.augs = augmentations
+        self.ratio = balance_ratio
+        self.boost = boost_frames
+        assert (boost_frames > 1.0 and len(self.labels_df.columns) > 2) or boost_frames == 1.0
+
+        splitter = StratifiedKFold(n_splits=k_folds)
+        splits = splitter.split(self.labels_df.iloc[:, 0].tolist(), list(map(lambda l: 3 if l == 4 else l, self.labels_df.iloc[:, 1].tolist())))
+        self.folds = []
+        for train_idx, val_idx in splits:
+            fold = {'train': self.create_set(train_idx), 'val': self.create_set(val_idx)}
+            self.folds.append(fold)
+
+        self.k = 0
+        self.mode = 'train'
+
+    def create_set(self, idx):
+        eyes = self.labels_df.iloc[idx, 0].tolist()
+        labels = self.labels_df.iloc[idx, 1].tolist()
+
+        assert len(eyes) == len(labels)
+        fold_set = ([], [])
+        for eye, label in zip(eyes, labels):
+            prefix = 'pos' if label > 0 else 'neg'
+            frames = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if eye in f]
+            frame_labels = [1 if label > 0 else 0 for i in range(len(frames))]
+            fold_set[0].extend(frames)
+            fold_set[1].extend(frame_labels)
+        return fold_set
+
+    def __len__(self):
+        return len(self.folds[self.k][self.mode][0])
+
+    def get_weight(self, idx):
+        severity = self.folds[self.k][self.mode][1][idx]
+        weight = self.ratio if severity == 0 else 1.0
+        # if self.boost > 1.0 and severity == 1 and self.labels_df.iloc[idx, 2] == 1:   TODO: Reimplement boosting
+        #    weight *= (1. + self.labels_df.iloc[idx, 3])
+        return weight
+
+    def __getitem__(self, idx):
+        severity = self.folds[self.k][self.mode][1][idx]
+        prefix = 'pos' if severity > 0 else 'neg'
+
+        img_name = self.folds[self.k][self.mode][0][idx]
+        img_path = os.path.join(self.root_dir, prefix, img_name)
+        img = cv2.imread(img_path)
+        assert img is not None, f'Image {img_path} has to exist'
+
+        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(img_name, only_eye=True)['eye_id'], 'name': img_name}
+        if self.augs:
+            sample['image'] = self.augs[self.mode](image=img)['image']
+        return sample
+
+    def set_k(self, k):
+        self.k = k
+
+    def set_train(self):
+        self.mode = 'train'
+
+    def set_eval(self):
+        self.mode = 'val'
 
 class SnippetDataset(Dataset):
     def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, validation=False, augmentations=None):
