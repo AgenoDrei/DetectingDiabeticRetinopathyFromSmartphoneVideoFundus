@@ -1,14 +1,17 @@
 import os
+from os.path import join
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from skvideo import io
 import time_wrap as tw
 from mpl_toolkits.axes_grid1 import ImageGrid
 
 ####################################
 ######### HELPER METHODS ###########
 ####################################
-from skimage import exposure
+from skimage import exposure, img_as_ubyte
 
 
 def load_images(path: str = './C001R_Cut', img_type: str = 'jpg') -> list:
@@ -236,3 +239,20 @@ def extract_video_frames(image_path: str, output_path: str, frames_per_second: i
                 prev = time_s
         else:
             break
+
+
+@tw.profile
+def extract_keyframes_ffmpeg(video_path: str, output_path: str) -> None:
+    """
+    Extract all keyframes from a video file and save them to disk
+    :param video_path: Absolute path to the input video
+    :param output_path: Absolute path where all keyframes will be saved
+    """
+    assert os.path.exists(video_path)
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    video_data = io.vreader(video_path, outputdict={'-vf': 'select=eq(pict_type\,PICT_TYPE_I)', '-vsync': 'vfr'})
+    cnt = 0
+    for kframe in video_data:
+        cv2.imwrite(join(output_path, f'{video_name}_{cnt:03d}.png'), cv2.cvtColor(kframe, code=cv2.COLOR_RGB2BGR))
+        cnt += 1
+    print(f'EXTK> Extracted {cnt} keyframes from {os.path.basename(video_path)} to {output_path}')
