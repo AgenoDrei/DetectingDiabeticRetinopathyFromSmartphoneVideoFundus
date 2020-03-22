@@ -123,7 +123,7 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     if not hp['multi_channel']:
         train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_train,
-                                      balance_ratio=hp['balance'], file_type='', use_prefix=True, boost_frames=hp['boosting'])
+                                      balance_ratio=hp['balance'], file_type='', use_prefix=True, boost_frames=hp['boosting'], occur_balance=True)
         val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_val, file_type='',
                                     use_prefix=True)
     else:
@@ -194,6 +194,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     cm = torch.zeros(2, 2)
     running_loss = 0.0
     majority_dict = MajorityDict()
+    sm = torch.nn.Softmax(dim=1)
 
     for i, batch in enumerate(loader):
         inputs = batch['image'].to(device, dtype=torch.float)
@@ -204,12 +205,13 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             _, preds = torch.max(outputs, 1)
+            probs = sm(outputs)
             running_loss += loss.item() * inputs.size(0)
 
         for true, pred in zip(labels, preds):
             cm[true, pred] += 1
 
-        majority_dict.add(preds.tolist(), labels, eye_ids)
+        majority_dict.add(preds.tolist(), labels, eye_ids, probabilities=probs.tolist())
 
     scores = calc_scores_from_confusion_matrix(cm)
     scores['loss'] = running_loss / len(loader.dataset)

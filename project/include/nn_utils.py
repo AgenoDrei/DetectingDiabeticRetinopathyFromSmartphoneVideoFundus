@@ -19,7 +19,7 @@ from collections import Counter
 
 
 class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False, boost_frames=1.0):
+    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False, boost_frames=1.0, occur_balance=False):
         """
         Retina Dataset for normal single frame data samples
         :param csv_file: path to csv file with labels
@@ -40,6 +40,7 @@ class RetinaDataset(Dataset):
         self.ratio = balance_ratio
         self.use_prefix = use_prefix
         self.boost = boost_frames
+        self.occur_balance = occur_balance
         assert transform is None or augmentations is None
         assert (boost_frames > 1.0 and len(self.labels_df.columns) > 2) or boost_frames == 1.0
 
@@ -51,7 +52,7 @@ class RetinaDataset(Dataset):
             idx = idx.tolist()
         severity = self.labels_df.iloc[idx, 1]
         weight = self.ratio if severity == 0 else 1.0
-        weight /= self.grade_count[get_video_desc(self.labels_df.iloc[idx, 0])['eye_id']] 
+        if self.occur_balance: weight /= self.grade_count[get_video_desc(self.labels_df.iloc[idx, 0])['eye_id']]
         if self.boost > 1.0 and severity == 1 and self.labels_df.iloc[idx, 2] == 1:
             weight *= (1. + self.labels_df.iloc[idx, 3])
         return weight
@@ -360,9 +361,10 @@ class MajorityDict:
     def __init__(self):
         self.dict = {}
 
-    def add(self, predictions, ground_truth, key_list):
+    def add(self, predictions, ground_truth, key_list, probabilities=None):
         """
         Add network predictions to Majority Dict, has to be called for every batch of the validation set
+        :param probabilities:
         :param predictions: list of predictions
         :param ground_truth: list of correct, known labels
         :param key_list: list of keys (like video id)
@@ -375,6 +377,16 @@ class MajorityDict:
                 entry['count'] += 1
             else:
                 self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1, 'label': int(true)}
+
+        if probabilities:
+            for gt, pred, prob, name in zip(ground_truth, predictions, probabilities, key_list):
+                if self.dict.get(name):
+                    entry = self.dict.get(name)
+                    entry['results'][round(prob, 8)] = pred
+                    entry['count'] += 1
+                else:
+                    self.dict[name] = {'label': int(gt), 'count': 1, 'results': {}}
+                    self.dict[name]['results'][round(prob, 8)] = pred
 
     def get_probabilities_and_labels(self):
         labels, probs, names = [], [], []
@@ -399,6 +411,22 @@ class MajorityDict:
             labels.append(item['label'])
             names.append(i)
         return {'predictions': preds, 'labels': labels, 'names': names}
+
+    def get_eye_predictions_from_best_scores(self, num_best_scores: int = 10, ratio: float = 0.5):
+        labels, preds, names = [], [], []
+        for i, item in self.dict.items():
+            labels.append(item['label'])
+            names.append(i)
+            sorted_res = sorted(item['results'].items(), reverse=True)[:num_best_scores]
+            sums = (0, 0)
+            for prob, pred in sorted_res:
+                sums[int(pred)] += prob
+            if sums[1] > ratio * (sums[0] * sums[1]):
+                preds.append(1)
+            else:
+                preds.append(0)
+        return {'predictions': preds, 'labels': labels, 'names': names}
+
 
     def get_roc_data(self, step_size: float = 0.05):
         """
