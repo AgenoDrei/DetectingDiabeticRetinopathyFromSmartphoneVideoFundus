@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import time
@@ -5,21 +6,19 @@ from os.path import join
 from typing import Tuple
 import albumentations as A
 import cv2
+import pretrainedmodels as ptm
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_processing import RandomFiveCrop
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, write_scores, \
+from nn_utils import SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, \
+    MajorityDict, write_scores, \
     write_f1_curve
+from sklearn.metrics import f1_score, recall_score, precision_score
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import models
-import pretrainedmodels as ptm
-import argparse
-from sklearn.metrics import f1_score, recall_score, precision_score
 from tqdm import tqdm
 
 
@@ -38,6 +37,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.4,
+        'num_frames': 20,
         'stump_pooling': True,
         'pretraining': True,
         'preprocessing': False
@@ -45,11 +45,13 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     aug_pipeline_train = A.Compose([
         A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
         A.RandomCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
-        # RandomFiveCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         A.HorizontalFlip(p=0.5),
         A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
-        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
-        A.OneOf([A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)], p=0.3),
+        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0,
+                           p=0.5),
+        A.OneOf(
+            [A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)],
+            p=0.3),
         A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
         A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
         A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
@@ -68,19 +70,21 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
 
-    net:RetinaNet = prepare_model(model_path, hyperparameter)
+    net: RetinaNet = prepare_model(model_path, hyperparameter)
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
+                              weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
 
     desc = f'_video_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
-    model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
+    model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
+                        num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
 def prepare_model(model_path, hp):
-    stump:ptm.inceptionv4 = ptm.inceptionv4()
+    stump: ptm.inceptionv4 = ptm.inceptionv4()
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
@@ -95,19 +99,24 @@ def prepare_model(model_path, hp):
                 param.requires_grad = False
             dfs_freeze(child)
 
-    net = RetinaNet(frame_stump=stump, do_avg_pooling=hp['stump_pooling'])
+    net = RetinaNet(frame_stump=stump, do_avg_pooling=hp['stump_pooling'], num_frames=hp['num_frames'])
     return net
 
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]), augmentations=aug_pipeline_train, balance_ratio=hp['balance'])
-    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]), augmentations=aug_pipeline_val, validation=False)
+    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]),
+                                   augmentations=aug_pipeline_train, balance_ratio=hp['balance'],
+                                   num_frames=hp['num_frames'])
+    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]),
+                                 augmentations=aug_pipeline_val)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=hp['batch_size'])
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=hp['batch_size'])
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False,
+                                               sampler=sampler, num_workers=hp['batch_size'])
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False,
+                                             num_workers=hp['batch_size'])
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
 
@@ -128,7 +137,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
             inputs = batch['frames'].to(device, dtype=torch.float)
             labels = batch['label'].to(device)
-            
+
             model.train()
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -153,7 +162,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         scheduler.step(val_loss)
 
     time_elapsed = time.time() - since
-    print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
+    print(
+        f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
     validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
     torch.save(model.state_dict(), f'model{description}')
@@ -191,7 +201,8 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
 
     # print(majority_dict)
     #   print(labels, preds)
-    video_scores = {'f1': f1_score(labels, preds), 'recall': recall_score(labels, preds), 'precision': precision_score(labels, preds)}
+    video_scores = {'f1': f1_score(labels, preds), 'recall': recall_score(labels, preds),
+                    'precision': precision_score(labels, preds)}
     write_scores(writer, 'eval', video_scores, cur_epoch)
 
     if calc_roc: write_f1_curve(majority_dict, writer)
@@ -201,7 +212,6 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
 
 if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
-    print(f'INFO> Using opencv version {cv2.__version__}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
     parser = argparse.ArgumentParser(description='Train your eyes out')
@@ -211,6 +221,7 @@ if __name__ == '__main__':
     parser.add_argument('--bs', help='Batch size for training', type=int, default=8)
     parser.add_argument('--epochs', help='Number of training epochs', type=int, default=50)
     args = parser.parse_args()
+    print('INFO> ', args)
 
     run(args.data, args.model, args.gpu, args.bs, args.epochs)
     sys.exit(0)

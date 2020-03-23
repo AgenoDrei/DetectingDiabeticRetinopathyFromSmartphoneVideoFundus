@@ -155,46 +155,40 @@ class FiveCropRetinaDataset(Dataset):
 
 
 class SnippetDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, validation=False, augmentations=None):
+    def __init__(self, csv_file, root_dir, num_frames=20, file_type='.png', balance_ratio=1.0, augmentations=None):
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.file_type = file_type
         self.augs = augmentations
         self.ratio = balance_ratio
-        self.mode = 'val' if validation else 'train'
-        self.num_crops = 5
+        self.num_frames = num_frames
 
     def __len__(self):
-        return len(self.labels_df) if self.mode == 'train' else len(self.labels_df) * self.num_crops
+        return len(self.labels_df)
 
     def __getitem__(self, idx):
         assert not torch.is_tensor(idx)
 
-        image_idx = idx // self.num_crops if self.mode == 'val' else idx
-        crop_idx = idx % self.num_crops
+        image_idx = idx
 
         severity = self.labels_df.iloc[image_idx, 1]
         prefix = 'pos' if severity == 1 else 'neg'
 
-        video_name = self.labels_df.iloc[image_idx, 0]
-        video_desc = get_video_desc(video_name)
+        snip_name = self.labels_df.iloc[image_idx, 0]
+        video_desc = get_video_desc(snip_name)
 
-        files = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_desc['eye_id'] == get_video_desc(f)['eye_id']]
+        video_all_frames = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_desc['eye_id'] == get_video_desc(f)['eye_id']]
         # if len(frame_index) - 1 < video_index:
         #    print('Problem with video ', video_name, video_index)
 
-        frame_names = sorted([f for f in files if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
-        # print(len(frame_names))
+        # frame_names = sorted([f for f in files if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
+        selection = np.random.randint(0, len(video_all_frames), self.num_frames) # Generate random indicies
+        selected_frames = [video_all_frames[idx] for idx in selection]
 
         sample = {'frames': [], 'label': severity, 'name': video_desc['eye_id'][:5]}
-        crop_state = np.random.randint(0, 5) if self.mode == 'train' else crop_idx
-        for name in frame_names:
+        for name in selected_frames:
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
-            img = self.augs(image=img)['image'] if self.augs else img  # TODO: Maybe improve later on
-            # Apply cropping after image augmentations, continue with transformation afterwards
-            # img = utl.do_five_crop(img, 299, 299, state=crop_state)
-            # img = alb.Normalize().apply(img)
-            # img = ToTensorV2().apply(img)
+            img = self.augs(image=img)['image'] if self.augs else img
             sample['frames'].append(img)
 
         sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
@@ -208,12 +202,12 @@ class SnippetDataset(Dataset):
 
 
 class RetinaNet(nn.Module):
-    def __init__(self, frame_stump, do_avg_pooling=True):
+    def __init__(self, frame_stump, num_frames=20, do_avg_pooling=True):
         super(RetinaNet, self).__init__()
         self.stump = frame_stump
         self.pool_stump = do_avg_pooling
-        self.num_frames = 20
-        self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (98304, 1024)
+        self.num_frames = num_frames
+        self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (98304, 1024)          # fix for higher resolutions / different networks
         self.out_stump = self.pool_params[0]
 
         self.avg_pooling = self.stump.avg_pool
