@@ -27,7 +27,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Using device {device}')
 
     hyperparameter = {
-        'data': os.path.basename(base_path),
+        'data': os.path.basename(os.path.normpath(base_path)),
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
@@ -38,7 +38,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'freeze': 0.0,
         'balance': 0.4,
         'num_frames': 30,
-        'stump_pooling': True,
+        'stump_pooling': False,
         'pretraining': True,
         'preprocessing': False
     }
@@ -70,7 +70,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
 
-    net: RetinaNet = prepare_model(model_path, hyperparameter)
+    net: RetinaNet = prepare_model(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
@@ -83,13 +83,13 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
                         num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
-def prepare_model(model_path, hp):
+def prepare_model(model_path, hp, device):
     stump: ptm.inceptionv4 = ptm.inceptionv4()
 
     num_ftrs = stump.last_linear.in_features
     stump.last_linear = nn.Linear(num_ftrs, 2)
     if hp['pretraining']:
-        stump.load_state_dict(torch.load(model_path))
+        stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.train()
 
