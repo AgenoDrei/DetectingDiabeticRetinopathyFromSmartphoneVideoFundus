@@ -19,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from pretrainedmodels import inceptionv4
 import argparse
 from sklearn.metrics import f1_score, recall_score, precision_score
+from torchvision import models
 from tqdm import tqdm
 
 
@@ -33,6 +34,7 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
+        'network': 'AlexNet',
         'image_size': 450,
         'crop_size': 399,
         'freeze': 0.0,
@@ -75,17 +77,22 @@ def run(base_path, gpu_name, batch_size, num_epochs):
 
 
 def prepare_model(hp):
-    net: inceptionv4 = inceptionv4()
+    net = None
+    if hp['network'] == 'AlexNet':
+        net = models.alexnet(pretrained=True)
+        num_ftrs = net.classifier[-1].in_features
+        net.classifier[-1] = Linear(num_ftrs, 2)
+    elif hp['network'] == 'Inception':
+        net = inceptionv4()
+        num_ftrs = net.last_linear.in_features
+        net.last_linear = Linear(num_ftrs, 2)
+        for i, child in enumerate(net.features.children()):
+            if i < len(net.features) * hp['freeze']:
+                for param in child.parameters():
+                    param.requires_grad = False
+                nn_utils.dfs_freeze(child)
 
-    num_ftrs = net.last_linear.in_features
-    net.last_linear = Linear(num_ftrs, 2)
     net.train()
-
-    for i, child in enumerate(net.features.children()):
-        if i < len(net.features) * hp['freeze']:
-            for param in child.parameters():
-                param.requires_grad = False
-            nn_utils.dfs_freeze(child)
     print(f'Model info: {net.__class__.__name__}, layer: {len(net.features)}, #frozen layer: {len(net.features) * hp["freeze"]}')
     return net
 
