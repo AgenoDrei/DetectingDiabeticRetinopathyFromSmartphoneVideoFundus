@@ -3,7 +3,6 @@ import sys
 import time
 from os.path import join
 from typing import Tuple
-
 import albumentations as A
 import cv2
 import torch
@@ -13,9 +12,10 @@ from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
 from multichannel_inceptionv4 import my_inceptionv4
 from narrow_inceptionv import NarrowInceptionV1
+from nn_datasets import RetinaDataset, MultiChannelRetinaDataset
 from nn_processing import ThresholdGlare
-from nn_utils import RetinaDataset, SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
-    MultiChannelRetinaDataset, write_scores, write_f1_curve, write_pr_curve
+from nn_utils import dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
+    write_scores, write_f1_curve, write_pr_curve
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter

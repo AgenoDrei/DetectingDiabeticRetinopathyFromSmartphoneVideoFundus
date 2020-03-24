@@ -7,6 +7,7 @@ from typing import Tuple
 import albumentations as alb
 import cv2
 import torch
+from nn_datasets import RetinaDataset
 from torch.nn import CrossEntropyLoss, Linear
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
@@ -99,10 +100,10 @@ def prepare_model(hp):
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train2', 'val2') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
-                                           augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
-    val_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
-                                                 augmentations=aug_pipeline_val, file_type='.jpg')
+    train_dataset = RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
+                                  augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
+    val_dataset = RetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
+                                augmentations=aug_pipeline_val, file_type='.jpg')
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -196,7 +197,6 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
 
 if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
-    print(f'INFO> Using opencv version {cv2.__version__}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
     parser = argparse.ArgumentParser(description='Pretraing but with crops (glutenfree)')
