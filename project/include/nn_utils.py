@@ -3,6 +3,8 @@ from collections import namedtuple
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import torch
 from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score, cohen_kappa_score, \
     precision_recall_curve
 from torch.utils.tensorboard import SummaryWriter
@@ -58,7 +60,8 @@ def get_video_desc(video_path, only_eye=False):
     elif len(info_parts) == 2:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
     elif len(info_parts) > 3:
-        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}
+        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]),
+                'confidence': info_parts[2]}
     else:
         return {'eye_id': ''}
 
@@ -108,14 +111,12 @@ def write_pr_curve(majority_dict, writer: SummaryWriter):
     for p, r in zip(precision, recall):
         print(f' {r}: {p}')
 
-    
-
-    #writer.add_pr_curve('eval/pr', labels, probs, 0)
-    #fig = plt.figure()
-    #plt.plot(recall, precision)
-    #plt.xlim([0.0, 1.0])
-    #plt.ylim([0.0, 1.0])
-    #writer.add_figure('eval/pr', fig)
+    # writer.add_pr_curve('eval/pr', labels, probs, 0)
+    # fig = plt.figure()
+    # plt.plot(recall, precision)
+    # plt.xlim([0.0, 1.0])
+    # plt.ylim([0.0, 1.0])
+    # writer.add_figure('eval/pr', fig)
 
 
 def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bool = False):
@@ -126,7 +127,8 @@ def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bo
     if full_report:
         writer.add_scalar(f'{tag}/kappa', scores['kappa'], cur_epoch)
         writer.add_scalar(f'{tag}/accuracy', scores['accuracy'], cur_epoch)
-    print(f'{tag[0].upper()}{tag[1:]} scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+    print(
+        f'{tag[0].upper()}{tag[1:]} scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
 
 
 class MajorityDict:
@@ -148,7 +150,8 @@ class MajorityDict:
                 entry[str(pred)] += 1
                 entry['count'] += 1
             else:
-                self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1, 'label': int(true)}
+                self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1,
+                                          'label': int(true)}
 
         if probabilities:
             for gt, pred, prob, name in zip(ground_truth, predictions, probabilities, key_list):
@@ -199,7 +202,6 @@ class MajorityDict:
                 preds.append(0)
         return {'predictions': preds, 'labels': labels, 'names': names}
 
-
     def get_roc_data(self, step_size: float = 0.05):
         """
         Generate predictions for different thresholds
@@ -217,17 +219,46 @@ Score = namedtuple('Score', ['f1', 'precision', 'recall', 'accuracy', 'kappa', '
 
 class Scores:
     def __init__(self):
-        self.predictions = []
-        self.labels = []
-        self.probabilities = []
-        self.tags = []
+        self.columns = ['eye_id', 'label', 'prediction', 'probability']
+        self.data = pd.DataFrame(columns=self.columns)
 
-    def add(self, preds: list, lables: list, probs: list = None, tags: list = None):
-        self.predictions.extend(preds)
-        self.labels.extend(lables)
-        if probs: self.probabilities.extend(probs)
-        if tags: self.tags.extend(tags)
+    def add(self, preds: torch.Tensor, labels: torch.Tensor, tags: list = None, probs: torch.Tensor = None):
+        new_data = tags if tags is not None else ['train' for i in range(len(labels.tolist()))], \
+                   labels.tolist(), \
+                   preds.tolist(), \
+                   probs.tolist() if probs is not None else [0 for i in range(len(labels.tolist()))]
+
+        new_data_dict = {col: new_data[i] for i, col in enumerate(self.columns)}
+        self.data = self.data.append(pd.DataFrame(new_data_dict), ignore_index=True)
+        # pd.concat([self.data].extend(pd.DataFrame()), ignore_index=True)
 
     def calc_scores(self, as_dict: bool = False):
-        score = Score(f1_score(self.labels, self.predictions), precision_score(self.labels, self.predictions), recall_score(self.labels, self.predictions), accuracy_score(self.labels, self.predictions), cohen_kappa_score(self.labels, self.predictions), 0)
+        score = Score(f1_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      precision_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      recall_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      accuracy_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      cohen_kappa_score(self.data['label'].tolist(), self.data['prediction'].tolist()), 0)
+        return score._asdict() if as_dict else score
+
+    def calc_scores_eye(self, as_dict: bool = False, ratio: float = 0.5, top_percent=1.0):
+        eye_data = pd.DataFrame(columns=self.columns)
+        eye_groups = self.data.groupby('eye_id')  # create group for different eyes
+
+        for name, group in eye_groups:
+            num_voting_values = int(top_percent * len(group))  # percentage of values considered
+            if top_percent != 1.0:
+                group.sort_values(by=['probability'], ascending=False)  # sort predictions by confidence
+
+            pos = int(group['prediction'][:num_voting_values].sum())  # count positive predictions
+            eye_prediction = 1 if pos / num_voting_values >= ratio else 0
+            eye_data = eye_data.append({
+                self.columns[0]: name, self.columns[1]: group.iloc[0, 1], self.columns[2]: eye_prediction,
+                self.columns[3]: 0.0
+            }, ignore_index=True)
+
+        score = Score(f1_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      precision_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      recall_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      accuracy_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      cohen_kappa_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()), 0)
         return score._asdict() if as_dict else score

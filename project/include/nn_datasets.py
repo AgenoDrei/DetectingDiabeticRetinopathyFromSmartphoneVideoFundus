@@ -24,7 +24,8 @@ class RetinaDataset(Dataset):
         :param boost_frames: boost frames if a third weak prediciton column is available
         """
         self.labels_df = pd.read_csv(csv_file)
-        self.grade_count = Counter([get_video_desc(name)['eye_id'] for name in self.labels_df['image'].tolist()])
+        self.grade_count = Counter(
+            [get_video_desc(name)['eye_id'] for name in self.labels_df['image'].tolist()]) if occur_balance else None
         self.root_dir = root_dir
         self.file_type = file_type
         self.transform = transform

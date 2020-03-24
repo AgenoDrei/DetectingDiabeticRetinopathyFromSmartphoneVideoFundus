@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import time
@@ -5,6 +6,7 @@ from os.path import join
 from typing import Tuple
 import albumentations as A
 import cv2
+import pretrainedmodels as ptm
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,15 +16,10 @@ from multichannel_inceptionv4 import my_inceptionv4
 from narrow_inceptionv import NarrowInceptionV1
 from nn_datasets import RetinaDataset, MultiChannelRetinaDataset
 from nn_processing import ThresholdGlare
-from nn_utils import dfs_freeze, calc_scores_from_confusion_matrix, get_video_desc, MajorityDict, \
-    write_scores, write_f1_curve, write_pr_curve
+from nn_utils import dfs_freeze, write_scores, Scores
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import models
-import pretrainedmodels as ptm
-import argparse
-from sklearn.metrics import f1_score, recall_score, precision_score
 from tqdm import tqdm
 
 
@@ -150,7 +147,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         print('-' * 10)
 
         running_loss = 0.0
-        cm = torch.zeros(2, 2)
+        scores = Scores()
 
         # Iterate over data.
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
@@ -166,12 +163,10 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
             loss.backward()
             optimizer.step()
 
-            # statistics
+            scores.add(pred, labels)
             running_loss += loss.item() * inputs.size(0)
-            for true, pred in zip(labels, pred):
-                cm[int(true), int(pred)] += 1
 
-        train_scores = calc_scores_from_confusion_matrix(cm)
+        train_scores = scores.calc_scores(as_dict=True)
         train_scores['loss'] = running_loss / len(loaders[0].dataset)
         write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
@@ -191,10 +186,9 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
 def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
-    cm = torch.zeros(2, 2)
     running_loss = 0.0
-    majority_dict = MajorityDict()
     sm = torch.nn.Softmax(dim=1)
+    scores = Scores()
 
     for i, batch in enumerate(loader):
         inputs = batch['image'].to(device, dtype=torch.float)
@@ -208,24 +202,14 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
             probs = sm(outputs)
             running_loss += loss.item() * inputs.size(0)
 
-        for true, pred in zip(labels, preds):
-            cm[true, pred] += 1
+        scores.add(preds, labels, tags=eye_ids, probs=probs)
 
-        majority_dict.add(preds.tolist(), labels, eye_ids, probabilities=probs.tolist())
+    val_scores = scores.calc_scores(as_dict=True)
+    val_scores['loss'] = running_loss / len(loader.dataset)
+    if not calc_roc: write_scores(writer, 'val', val_scores, cur_epoch)
 
-    scores = calc_scores_from_confusion_matrix(cm)
-    scores['loss'] = running_loss / len(loader.dataset)
-    if not calc_roc: write_scores(writer, 'val', scores, cur_epoch)
-
-    v = majority_dict.get_predictions_and_labels()
-    eye_scores = {'precision': precision_score(v['labels'], v['predictions']),
-                  'recall': recall_score(v['labels'], v['predictions']),
-                  'f1': f1_score(v['labels'], v['predictions'])}
+    eye_scores = scores.calc_scores_eye(as_dict=True)
     if not calc_roc: write_scores(writer, 'eval', eye_scores, cur_epoch)
-
-    if calc_roc:
-        write_f1_curve(majority_dict, writer)
-        write_pr_curve(majority_dict, writer)
 
     return running_loss / len(loader.dataset), eye_scores['f1']
 
