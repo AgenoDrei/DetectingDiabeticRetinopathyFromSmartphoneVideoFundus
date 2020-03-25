@@ -37,14 +37,14 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'crop_size': 299,
         'freeze': 0.0,
         'balance': 0.4,
-        'num_frames': 30,
+        'num_frames': 20,
         'stump_pooling': False,
         'pretraining': True,
         'preprocessing': False
     }
     aug_pipeline_train = A.Compose([
         A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
-        A.RandomCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
+        A.CenterCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
         A.HorizontalFlip(p=0.5),
         A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
         A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0,
@@ -114,9 +114,9 @@ def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False,
-                                               sampler=sampler, num_workers=hp['batch_size'])
+                                               sampler=sampler, num_workers=16)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False,
-                                             num_workers=hp['batch_size'])
+                                             num_workers=16)
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
 

@@ -185,12 +185,15 @@ class SnippetDataset(Dataset):
         selection = np.random.randint(0, len(video_all_frames), self.num_frames) # Generate random indicies
         selected_frames = [video_all_frames[idx] for idx in selection]
 
-        sample = {'frames': [], 'label': severity, 'name': video_desc['eye_id'][:5]}
-        for name in selected_frames:
+        sample = {'frames': {}, 'label': severity, 'name': video_desc['eye_id'][:5]}
+        for i, name in enumerate(selected_frames):
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
-            img = self.augs(image=img)['image'] if self.augs else img
-            sample['frames'].append(img)
+            # img = self.augs(image=img)['image'] if self.augs else img
+            sample_name = 'image' + (str(i) if i != 0 else '')
+            sample['frames'][sample_name] = img
 
+        self.augs.add_targets({key: 'image' for key in list(sample['frames'].keys())[1:]})
+        sample['frames'] = list(self.augs(**sample['frames']).values())
         sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
         return sample
 
