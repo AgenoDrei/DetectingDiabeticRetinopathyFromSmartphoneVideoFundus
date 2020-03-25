@@ -24,7 +24,7 @@ from torchvision import models
 from tqdm import tqdm
 
 
-def run(base_path, gpu_name, batch_size, num_epochs):
+def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
@@ -64,7 +64,7 @@ def run(base_path, gpu_name, batch_size, num_epochs):
 
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
-    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
+    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val, num_workers)
 
     net: inceptionv4 = prepare_model(hyperparameter)
 
@@ -98,7 +98,7 @@ def prepare_model(hp):
     return net
 
 
-def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
+def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val, num_workers):
     set_names = ('train2', 'val2') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
                                   augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
@@ -107,8 +107,8 @@ def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=hp['batch_size'])
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=hp['batch_size'])
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=num_workers)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=num_workers)
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
 
@@ -162,9 +162,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
 def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
-    cm = torch.zeros(2, 2)
     running_loss = 0.0
-    majority_dict = nn_utils.MajorityDict()
     perf_metrics = nn_utils.Scores()
 
     for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
@@ -179,8 +177,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
             _, preds = torch.max(outputs, 1)
             running_loss += loss.item() * inputs.size(0)
 
-        majority_dict.add(preds.tolist(), labels, crop_idx)
-        perf_metrics.add(preds.tolist(), labels.tolist(), tags=crop_idx)
+        perf_metrics.add(preds, labels, tags=crop_idx)
 
     scores = perf_metrics.calc_scores(as_dict=True)
     scores['loss'] = running_loss / len(loader.dataset)
@@ -206,5 +203,5 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', help='Number of training epochs', type=int, default=50)
     args = parser.parse_args()
 
-    run(args.data, args.gpu, args.bs, args.epochs)
+    run(args.data, args.gpu, args.bs, args.epochs, 28)
     sys.exit(0)
