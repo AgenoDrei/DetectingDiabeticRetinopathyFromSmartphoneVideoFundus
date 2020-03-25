@@ -7,6 +7,7 @@ from typing import Tuple
 import albumentations as alb
 import cv2
 import torch
+from nn_datasets import RetinaDataset
 from torch.nn import CrossEntropyLoss, Linear
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
@@ -19,6 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 from pretrainedmodels import inceptionv4
 import argparse
 from sklearn.metrics import f1_score, recall_score, precision_score
+from torchvision import models
 from tqdm import tqdm
 
 
@@ -33,6 +35,7 @@ def run(base_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
+        'network': 'AlexNet',
         'image_size': 450,
         'crop_size': 399,
         'freeze': 0.0,
@@ -75,27 +78,32 @@ def run(base_path, gpu_name, batch_size, num_epochs):
 
 
 def prepare_model(hp):
-    net: inceptionv4 = inceptionv4()
+    net = None
+    if hp['network'] == 'AlexNet':
+        net = models.alexnet(pretrained=True)
+        num_ftrs = net.classifier[-1].in_features
+        net.classifier[-1] = Linear(num_ftrs, 2)
+    elif hp['network'] == 'Inception':
+        net = inceptionv4()
+        num_ftrs = net.last_linear.in_features
+        net.last_linear = Linear(num_ftrs, 2)
+        for i, child in enumerate(net.features.children()):
+            if i < len(net.features) * hp['freeze']:
+                for param in child.parameters():
+                    param.requires_grad = False
+                nn_utils.dfs_freeze(child)
 
-    num_ftrs = net.last_linear.in_features
-    net.last_linear = Linear(num_ftrs, 2)
     net.train()
-
-    for i, child in enumerate(net.features.children()):
-        if i < len(net.features) * hp['freeze']:
-            for param in child.parameters():
-                param.requires_grad = False
-            nn_utils.dfs_freeze(child)
     print(f'Model info: {net.__class__.__name__}, layer: {len(net.features)}, #frozen layer: {len(net.features) * hp["freeze"]}')
     return net
 
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train2', 'val2') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
-                                           augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
-    val_dataset = nn_utils.RetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
-                                                 augmentations=aug_pipeline_val, file_type='.jpg')
+    train_dataset = RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
+                                  augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
+    val_dataset = RetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
+                                augmentations=aug_pipeline_val, file_type='.jpg')
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -189,7 +197,6 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
 
 if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
-    print(f'INFO> Using opencv version {cv2.__version__}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
     parser = argparse.ArgumentParser(description='Pretraing but with crops (glutenfree)')

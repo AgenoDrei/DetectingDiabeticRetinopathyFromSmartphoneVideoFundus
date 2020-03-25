@@ -1,237 +1,14 @@
+import os
 from collections import namedtuple
-
-import torch
+import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import cv2
-import os
-import albumentations as alb
-from albumentations.pytorch import ToTensorV2
-from sklearn.metrics import f1_score, precision_score, recall_score, auc, accuracy_score, cohen_kappa_score, precision_recall_curve
-from torch import nn
-from torch.utils.data import Dataset
+import torch
+from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score, cohen_kappa_score, \
+    precision_recall_curve
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import utils
-import utils as utl
-import nn_processing
-from collections import Counter
-
-
-class RetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None, use_prefix=False, boost_frames=1.0, occur_balance=False):
-        """
-        Retina Dataset for normal single frame data samples
-        :param csv_file: path to csv file with labels
-        :param root_dir: path to folder with sample images
-        :param file_type: file ending of images (e.g '.jpg')
-        :param balance_ratio: adjust sample weight in case of unbalanced classes
-        :param transform: pytorch data augmentation
-        :param augmentations: albumentation data augmentation
-        :param use_prefix: data folder contains subfolders for classes (pos / neg)
-        :param boost_frames: boost frames if a third weak prediciton column is available
-        """
-        self.labels_df = pd.read_csv(csv_file)
-        self.grade_count = Counter([get_video_desc(name)['eye_id'] for name in self.labels_df['image'].tolist()])
-        self.root_dir = root_dir
-        self.file_type = file_type
-        self.transform = transform
-        self.augs = augmentations
-        self.ratio = balance_ratio
-        self.use_prefix = use_prefix
-        self.boost = boost_frames
-        self.occur_balance = occur_balance
-        assert transform is None or augmentations is None
-        assert (boost_frames > 1.0 and len(self.labels_df.columns) > 2) or boost_frames == 1.0
-
-    def __len__(self):
-        return len(self.labels_df)
-
-    def get_weight(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        severity = self.labels_df.iloc[idx, 1]
-        weight = self.ratio if severity == 0 else 1.0
-        if self.occur_balance: weight /= self.grade_count[get_video_desc(self.labels_df.iloc[idx, 0])['eye_id']]
-        if self.boost > 1.0 and severity == 1 and self.labels_df.iloc[idx, 2] == 1:
-            weight *= (1. + self.labels_df.iloc[idx, 3])
-        return weight
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        severity = self.labels_df.iloc[idx, 1]
-
-        if self.use_prefix:
-            prefix = 'pos' if severity == 1 else 'neg'
-        else:
-            prefix = ''
-        img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
-        img = cv2.imread(img_name)
-        assert img is not None, f'Image {img_name} has to exist'
-        # image = image[:,:,[2, 1, 0]]
-
-        sample = {'image': img, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id'], 'name': self.labels_df.iloc[idx, 0]}
-        if self.transform:
-            sample['image'] = img[:, :, [2, 1, 0]]
-            sample['image'] = self.transform(sample['image'])
-        if self.augs:
-            sample['image'] = self.augs(image=img)['image']
-        return sample
-
-
-class MultiChannelRetinaDataset(RetinaDataset):
-    def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, augmentations=None, use_prefix=False, processed_suffix='_nn'):
-        super().__init__(csv_file, root_dir, file_type, balance_ratio, None, augmentations, use_prefix)
-        self.suffix = processed_suffix
-
-    def __getitem__(self, idx):
-        assert not torch.is_tensor(idx)
-        severity = self.labels_df.iloc[idx, 1]
-        if self.use_prefix:
-            prefix = 'pos' if severity == 1 else 'neg'
-        else:
-            prefix = ''
-        img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
-        processed_name = os.path.join(self.root_dir + self.suffix, prefix, self.labels_df.iloc[idx, 0] + self.file_type)
-        img = cv2.imread(img_name)
-        processed_img = cv2.imread(processed_name)
-        sample = {'image': None, 'label': severity, 'eye_id': get_video_desc(self.labels_df.iloc[idx, 0], only_eye=True)['eye_id']}
-        if self.augs:
-            img = self.augs(image=img)['image']
-            processed_img = self.augs(image=processed_img)['image']
-            sample['image'] = torch.cat([img, processed_img])
-        return sample
-
-
-class FiveCropRetinaDataset(Dataset):
-    def __init__(self, csv_file, root_dir, size, file_type='.png', balance_ratio=1.0, augmentations=None, use_prefix=False):
-        """
-        Args:
-            csv_file (string): Path to the csv file with annotations.
-            root_dir (string): Directory with all the images.
-        """
-        self.labels_df = pd.read_csv(csv_file)
-        self.root_dir = root_dir
-        self.file_type = file_type
-        self.augs = augmentations
-        self.ratio = balance_ratio
-        self.use_prefix = use_prefix
-        self.num_crops = 5
-        self.size = size
-
-    def __len__(self):
-        return len(self.labels_df) * self.num_crops
-
-    def get_weight(self, idx):
-        assert not torch.is_tensor(idx)
-        severity = self.labels_df.iloc[idx // self.num_crops, 1]
-        return self.ratio if severity == 0 else 1.0
-
-    def __getitem__(self, idx):
-        assert not torch.is_tensor(idx)
-
-        image_idx = idx // self.num_crops
-        crop_idx = idx % self.num_crops
-
-        severity = self.labels_df.iloc[image_idx, 1]
-
-        if self.use_prefix:
-            prefix = 'pos' if severity == 1 else 'neg'
-        else:
-            prefix = ''
-
-        img_name = os.path.join(self.root_dir, prefix, self.labels_df.iloc[image_idx, 0] + self.file_type)
-        img = cv2.imread(img_name)
-        # image = image[:,:,[2, 1, 0]]
-
-        sample = {'image': img, 'label': severity, 'image_idx': image_idx}
-        if self.augs:
-            img = cv2.resize(img, (self.size[0], self.size[0]))
-            img = utl.do_five_crop(img, self.size[1], self.size[1], crop_idx)
-            sample['image'] = self.augs(image=img)['image']
-        return sample
-
-
-class SnippetDataset(Dataset):
-    def __init__(self, csv_file, root_dir, num_frames=20, file_type='.png', balance_ratio=1.0, augmentations=None):
-        self.labels_df = pd.read_csv(csv_file)
-        self.root_dir = root_dir
-        self.file_type = file_type
-        self.augs = augmentations
-        self.ratio = balance_ratio
-        self.num_frames = num_frames
-
-    def __len__(self):
-        return len(self.labels_df)
-
-    def __getitem__(self, idx):
-        assert not torch.is_tensor(idx)
-
-        image_idx = idx
-
-        severity = self.labels_df.iloc[image_idx, 1]
-        prefix = 'pos' if severity == 1 else 'neg'
-
-        snip_name = self.labels_df.iloc[image_idx, 0]
-        video_desc = get_video_desc(snip_name)
-
-        video_all_frames = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if video_desc['eye_id'] == get_video_desc(f)['eye_id']]
-        # if len(frame_index) - 1 < video_index:
-        #    print('Problem with video ', video_name, video_index)
-
-        # frame_names = sorted([f for f in files if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
-        selection = np.random.randint(0, len(video_all_frames), self.num_frames) # Generate random indicies
-        selected_frames = [video_all_frames[idx] for idx in selection]
-
-        sample = {'frames': {}, 'label': severity, 'name': video_desc['eye_id'][:5]}
-        for i, name in enumerate(selected_frames):
-            img = cv2.imread(os.path.join(self.root_dir, prefix, name))
-            # img = self.augs(image=img)['image'] if self.augs else img
-            sample_name = 'image' + (str(i) if i != 0 else '')
-            sample['frames'][sample_name] = img
-
-        self.augs.add_targets({key: 'image' for key in list(sample['frames'].keys())[1:]})
-        sample['frames'] = list(self.augs(**sample['frames']).values())
-        sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
-        return sample
-
-    def get_weight(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        severity = self.labels_df.iloc[idx, 1]
-        return self.ratio if severity == 0 else 1.0
-
-
-class RetinaNet(nn.Module):
-    def __init__(self, frame_stump, num_frames=20, do_avg_pooling=True):
-        super(RetinaNet, self).__init__()
-        self.stump = frame_stump
-        self.pool_stump = do_avg_pooling
-        self.num_frames = num_frames
-        self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (98304, 1024)          # fix for higher resolutions / different networks
-        self.out_stump = self.pool_params[0]
-
-        self.avg_pooling = self.stump.avg_pool
-        self.temporal_pooling = nn.MaxPool1d(self.num_frames, stride=1, padding=0, dilation=self.out_stump)
-
-        self.after_pooling = nn.Sequential(nn.Linear(self.out_stump, self.pool_params[1]), nn.ReLU(), nn.Dropout(p=0.5), nn.Linear(self.pool_params[1], 2))
-        # self.fc1 = nn.Linear(self.out_stump, 256)
-        # self.fc2 = nn.Linear(256, 2)
-        # self.softmax = nn.Softmax()
-
-    def forward(self, x):
-        features = []
-        for idx in range(0, x.size(1)):  # Iterate over time dimension
-            out = self.stump.features(x[:, idx, :, :, :])  # Shove batch trough stump
-            out = self.avg_pooling(out) if self.pool_stump else out
-            out = out.view(out.size(0), -1)  # Flatten results for fc
-            features.append(out)  # Size: (B, c*h*w)
-        out = torch.cat(features, dim=1)
-        out = self.temporal_pooling(out.unsqueeze(dim=1))
-        out = self.after_pooling(out.view(out.size(0), -1))
-        return out
 
 
 def display_examples(ds):
@@ -283,7 +60,8 @@ def get_video_desc(video_path, only_eye=False):
     elif len(info_parts) == 2:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
     elif len(info_parts) > 3:
-        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]), 'confidence': info_parts[2]}
+        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]),
+                'confidence': info_parts[2]}
     else:
         return {'eye_id': ''}
 
@@ -333,14 +111,12 @@ def write_pr_curve(majority_dict, writer: SummaryWriter):
     for p, r in zip(precision, recall):
         print(f' {r}: {p}')
 
-    
-
-    #writer.add_pr_curve('eval/pr', labels, probs, 0)
-    #fig = plt.figure()
-    #plt.plot(recall, precision)
-    #plt.xlim([0.0, 1.0])
-    #plt.ylim([0.0, 1.0])
-    #writer.add_figure('eval/pr', fig)
+    # writer.add_pr_curve('eval/pr', labels, probs, 0)
+    # fig = plt.figure()
+    # plt.plot(recall, precision)
+    # plt.xlim([0.0, 1.0])
+    # plt.ylim([0.0, 1.0])
+    # writer.add_figure('eval/pr', fig)
 
 
 def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bool = False):
@@ -351,7 +127,8 @@ def write_scores(writer, tag: str, scores: dict, cur_epoch: int, full_report: bo
     if full_report:
         writer.add_scalar(f'{tag}/kappa', scores['kappa'], cur_epoch)
         writer.add_scalar(f'{tag}/accuracy', scores['accuracy'], cur_epoch)
-    print(f'{tag[0].upper()}{tag[1:]} scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
+    print(
+        f'{tag[0].upper()}{tag[1:]} scores:\n F1: {scores["f1"]},\n Precision: {scores["precision"]},\n Recall: {scores["recall"]}')
 
 
 class MajorityDict:
@@ -373,7 +150,8 @@ class MajorityDict:
                 entry[str(pred)] += 1
                 entry['count'] += 1
             else:
-                self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1, 'label': int(true)}
+                self.dict[key_list[i]] = {'0': 0 if int(pred) else 1, '1': 1 if int(pred) else 0, 'count': 1,
+                                          'label': int(true)}
 
         if probabilities:
             for gt, pred, prob, name in zip(ground_truth, predictions, probabilities, key_list):
@@ -424,7 +202,6 @@ class MajorityDict:
                 preds.append(0)
         return {'predictions': preds, 'labels': labels, 'names': names}
 
-
     def get_roc_data(self, step_size: float = 0.05):
         """
         Generate predictions for different thresholds
@@ -442,17 +219,46 @@ Score = namedtuple('Score', ['f1', 'precision', 'recall', 'accuracy', 'kappa', '
 
 class Scores:
     def __init__(self):
-        self.predictions = []
-        self.labels = []
-        self.probabilities = []
-        self.tags = []
+        self.columns = ['eye_id', 'label', 'prediction', 'probability']
+        self.data = pd.DataFrame(columns=self.columns)
 
-    def add(self, preds: list, lables: list, probs: list = None, tags: list = None):
-        self.predictions.extend(preds)
-        self.labels.extend(lables)
-        if probs: self.probabilities.extend(probs)
-        if tags: self.tags.extend(tags)
+    def add(self, preds: torch.Tensor, labels: torch.Tensor, tags: list = None, probs: torch.Tensor = None):
+        new_data = tags if tags is not None else ['train' for i in range(len(labels.tolist()))], \
+                   labels.tolist(), \
+                   preds.tolist(), \
+                   probs.tolist() if probs is not None else [0 for i in range(len(labels.tolist()))]
+
+        new_data_dict = {col: new_data[i] for i, col in enumerate(self.columns)}
+        self.data = self.data.append(pd.DataFrame(new_data_dict), ignore_index=True)
+        # pd.concat([self.data].extend(pd.DataFrame()), ignore_index=True)
 
     def calc_scores(self, as_dict: bool = False):
-        score = Score(f1_score(self.labels, self.predictions), precision_score(self.labels, self.predictions), recall_score(self.labels, self.predictions), accuracy_score(self.labels, self.predictions), cohen_kappa_score(self.labels, self.predictions), 0)
+        score = Score(f1_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      precision_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      recall_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      accuracy_score(self.data['label'].tolist(), self.data['prediction'].tolist()),
+                      cohen_kappa_score(self.data['label'].tolist(), self.data['prediction'].tolist()), 0)
+        return score._asdict() if as_dict else score
+
+    def calc_scores_eye(self, as_dict: bool = False, ratio: float = 0.5, top_percent=1.0):
+        eye_data = pd.DataFrame(columns=self.columns)
+        eye_groups = self.data.groupby('eye_id')  # create group for different eyes
+
+        for name, group in eye_groups:
+            num_voting_values = int(top_percent * len(group))  # percentage of values considered
+            if top_percent != 1.0:
+                group.sort_values(by=['probability'], ascending=False)  # sort predictions by confidence
+
+            pos = int(group['prediction'][:num_voting_values].sum())  # count positive predictions
+            eye_prediction = 1 if pos / num_voting_values >= ratio else 0
+            eye_data = eye_data.append({
+                self.columns[0]: name, self.columns[1]: group.iloc[0, 1], self.columns[2]: eye_prediction,
+                self.columns[3]: 0.0
+            }, ignore_index=True)
+
+        score = Score(f1_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      precision_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      recall_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      accuracy_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()),
+                      cohen_kappa_score(eye_data['label'].tolist(), eye_data['prediction'].tolist()), 0)
         return score._asdict() if as_dict else score

@@ -12,7 +12,9 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_utils import SnippetDataset, RetinaNet, dfs_freeze, calc_scores_from_confusion_matrix, \
+from nn_datasets import SnippetDataset
+from nn_models import RetinaNet
+from nn_utils import dfs_freeze, calc_scores_from_confusion_matrix, \
     MajorityDict, write_scores, \
     write_f1_curve
 from sklearn.metrics import f1_score, recall_score, precision_score
