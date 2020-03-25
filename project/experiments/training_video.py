@@ -12,11 +12,11 @@ import torch.nn as nn
 import torch.optim as optim
 from albumentations.augmentations.transforms import RandomBrightnessContrast
 from albumentations.pytorch import ToTensorV2
-from nn_datasets import SnippetDataset
-from nn_models import RetinaNet
+from nn_datasets import SnippetDataset, SnippetDataset2
+from nn_models import RetinaNet, RetinaNet2
 from nn_utils import dfs_freeze, calc_scores_from_confusion_matrix, \
     MajorityDict, write_scores, \
-    write_f1_curve
+    write_f1_curve, Scores
 from sklearn.metrics import f1_score, recall_score, precision_score
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
@@ -101,23 +101,23 @@ def prepare_model(model_path, hp, device):
                 param.requires_grad = False
             dfs_freeze(child)
 
-    net = RetinaNet(frame_stump=stump, do_avg_pooling=hp['stump_pooling'], num_frames=hp['num_frames'])
+    net = RetinaNet2(frame_stump=stump, do_avg_pooling=hp['stump_pooling'], num_frames=hp['num_frames'])
     return net
 
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = SnippetDataset(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]),
-                                   augmentations=aug_pipeline_train, balance_ratio=hp['balance'],
-                                   num_frames=hp['num_frames'])
-    val_dataset = SnippetDataset(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]),
-                                 augmentations=aug_pipeline_val)
+    train_dataset = SnippetDataset2(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]),
+                                    augmentations=aug_pipeline_train, balance_ratio=hp['balance'],
+                                    num_frames=hp['num_frames'])
+    val_dataset = SnippetDataset2(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]),
+                                  augmentations=aug_pipeline_val, num_frames=hp['num_frames'])
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False,
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=False,
                                                sampler=sampler, num_workers=16)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False,
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False,
                                              num_workers=16)
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
@@ -133,7 +133,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         print('-' * 10)
 
         running_loss = 0.0
-        cm = torch.zeros(2, 2)
+        scores = Scores()
 
         # Iterate over data.
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
@@ -151,10 +151,9 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            for true, pred in zip(labels, pred):
-                cm[int(true), int(pred)] += 1
+            scores.add(pred, labels)
 
-        train_scores = calc_scores_from_confusion_matrix(cm)
+        train_scores = scores.calc_scores(as_dict=True)
         train_scores['loss'] = running_loss / len(loaders[0].dataset)
         write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
@@ -174,9 +173,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
 def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
-    cm = torch.zeros(2, 2)
     running_loss = 0.0
-    majority_dict = MajorityDict()
+    scores = Scores()
 
     for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['frames'].to(device, dtype=torch.float)
@@ -189,25 +187,14 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
             _, preds = torch.max(outputs, 1)
             running_loss += loss.item() * inputs.size(0)
 
-        for true, pred in zip(labels, preds):
-            cm[true, pred] += 1
+        scores.add(preds, labels, tags=video_name)
 
-        majority_dict.add(preds.tolist(), labels, video_name)
+    val_scores = scores.calc_scores(as_dict=True)
+    val_scores['loss'] = running_loss / len(loader.dataset)
+    write_scores(writer, 'val', val_scores, cur_epoch)
 
-    scores = calc_scores_from_confusion_matrix(cm)
-    scores['loss'] = running_loss / len(loader.dataset)
-    write_scores(writer, 'val', scores, cur_epoch)
-
-    majority_res = majority_dict.get_predictions_and_labels()
-    labels, preds = majority_res['labels'], majority_res['predictions']
-
-    # print(majority_dict)
-    #   print(labels, preds)
-    video_scores = {'f1': f1_score(labels, preds), 'recall': recall_score(labels, preds),
-                    'precision': precision_score(labels, preds)}
+    video_scores = scores.calc_scores_eye(as_dict=True)
     write_scores(writer, 'eval', video_scores, cur_epoch)
-
-    if calc_roc: write_f1_curve(majority_dict, writer)
 
     return running_loss / len(loader.dataset), scores['f1']
 

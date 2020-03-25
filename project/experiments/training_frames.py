@@ -23,7 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 
-def run(base_path, model_path, gpu_name, batch_size, num_epochs):
+def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
@@ -72,7 +72,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
-    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
+    loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val,
+                              num_workers)
 
     net = prepare_model(model_path, hyperparameter, device)
 
@@ -116,23 +117,31 @@ def prepare_model(model_path, hp, device):
     return stump
 
 
-def prepare_dataset(base_name: str, hp, aug_train, aug_val):
+def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     if not hp['multi_channel']:
-        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_train,
-                                      balance_ratio=hp['balance'], file_type='', use_prefix=True, boost_frames=hp['boosting'], occur_balance=True)
-        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_val, file_type='',
+        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]),
+                                      augmentations=aug_train,
+                                      balance_ratio=hp['balance'], file_type='', use_prefix=True,
+                                      boost_frames=hp['boosting'], occur_balance=True)
+        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]),
+                                    augmentations=aug_val, file_type='',
                                     use_prefix=True)
     else:
-        train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]), augmentations=aug_train,
-                                                  balance_ratio=hp['balance'], file_type='', use_prefix=True, processed_suffix='_pp')
-        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]), augmentations=aug_val,
+        train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'),
+                                                  join(base_name, set_names[0]), augmentations=aug_train,
+                                                  balance_ratio=hp['balance'], file_type='', use_prefix=True,
+                                                  processed_suffix='_pp')
+        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]),
+                                                augmentations=aug_val,
                                                 file_type='', use_prefix=True, processed_suffix='_pp')
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False, sampler=sampler, num_workers=hp['batch_size'])
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False, num_workers=hp['batch_size'])
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=hp['batch_size'], shuffle=False,
+                                               sampler=sampler, num_workers=num_workers)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False,
+                                             num_workers=num_workers)
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
     return train_loader, val_loader
 
@@ -224,7 +233,8 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')
     parser.add_argument('--bs', help='Batch size for training', type=int, default=8)
     parser.add_argument('--epochs', help='Number of training epochs', type=int, default=50)
+    parser.add_argument('--workers', help='Number of workers', type=int, default=16)
     args = parser.parse_args()
 
-    run(args.data, args.model, args.gpu, args.bs, args.epochs)
+    run(args.data, args.model, args.gpu, args.bs, args.epochs, args.workers)
     sys.exit(0)
