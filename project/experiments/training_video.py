@@ -39,7 +39,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'crop_size': 299,
         'freeze': 0.0,
         'balance': 0.4,
-        'num_frames': 20,
+        'num_frames': 30,
         'stump_pooling': False,
         'pretraining': True,
         'preprocessing': False
@@ -196,7 +196,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     video_scores = scores.calc_scores_eye(as_dict=True)
     write_scores(writer, 'eval', video_scores, cur_epoch)
 
-    return running_loss / len(loader.dataset), scores['f1']
+    return running_loss / len(loader.dataset), val_scores['f1']
 
 
 if __name__ == '__main__':

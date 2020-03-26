@@ -53,6 +53,7 @@ class RetinaNet2(nn.Module):
             nn.Linear(self.pool_params[1], 2))
 
     def forward(self, x):
+        x = torch.squeeze(x, dim=0)
         x = self.stump.features(x)
         h = self.avg_pooling(x) if self.pool_stump else x
         h = h.view(h.size(0), -1)  # Flatten results for fc / pooling
