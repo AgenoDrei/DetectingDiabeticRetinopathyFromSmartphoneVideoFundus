@@ -44,7 +44,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'boosting': 1.00,
         'use_clahe': False,
         'narrow_model': False,
-        'remove_glare': False
+        'remove_glare': False,
+        'voting_percentage': 0.1
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -84,9 +85,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
     desc = f'_paxos_frames_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
-    best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
+    best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
 
-    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter['num_epochs'], calc_roc=True)
+    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_model(model_path, hp, device):
@@ -146,7 +147,7 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
     return train_loader, val_loader
 
 
-def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, num_epochs=50, description='Vanilla'):
+def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, hp, num_epochs=50, description='Vanilla'):
     since = time.time()
     best_f1_val = -1
     best_model_path = None
@@ -178,7 +179,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         train_scores = scores.calc_scores(as_dict=True)
         train_scores['loss'] = running_loss / len(loaders[0].dataset)
         write_scores(writer, 'train', train_scores, epoch)
-        val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
+        val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, hp, epoch)
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
@@ -193,7 +194,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     return best_model_path
 
 
-def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False) -> Tuple[float, float]:
+def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
     running_loss = 0.0
     sm = torch.nn.Softmax(dim=1)
@@ -217,7 +218,7 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     val_scores['loss'] = running_loss / len(loader.dataset)
     if not calc_roc: write_scores(writer, 'val', val_scores, cur_epoch)
 
-    eye_scores = scores.calc_scores_eye(as_dict=True)
+    eye_scores = scores.calc_scores_eye(as_dict=True, top_percent=hp['voting_percentage'])
     if not calc_roc: write_scores(writer, 'eval', eye_scores, cur_epoch)
 
     return running_loss / len(loader.dataset), eye_scores['f1']
