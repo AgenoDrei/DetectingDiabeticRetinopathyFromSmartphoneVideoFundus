@@ -21,4 +21,4 @@ for row in df.itertuples():
         names[eye_id] = 1
 
 name_arr = np.array([*names.values()])
-print(f'Dataset stats:\n {name_arr.mean()},\n {name_arr.std()},\n {np.histogram(name_arr, bins=5)}, \n {np.histogram(name_arr, bins=10)}')
+print(f'Dataset stats:\n Mean> {name_arr.mean()},\n Standard Deviaton> {name_arr.std()},\n Median> {np.median(name_arr)},\n Histogram(5)> {np.histogram(name_arr, bins=5)}, \n Histogram(10)> {np.histogram(name_arr, bins=10)}')
