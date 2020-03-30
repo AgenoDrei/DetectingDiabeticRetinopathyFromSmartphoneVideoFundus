@@ -1,10 +1,15 @@
 import os
 from collections import Counter
+from os.path import join
+
 import cv2
+import nn_utils
 import numpy as np
 import pandas as pd
 import torch
 import utils as utl
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 from nn_utils import get_video_desc
 from torch.utils.data import Dataset
 
@@ -254,3 +259,80 @@ class SnippetDataset2(Dataset):
             idx = idx.tolist()
         severity = self.labels_df.iloc[idx, 1]
         return self.ratio if severity == 0 else 1.0
+
+
+class PaxosBags(Dataset):
+    def __init__(self, csv_file, root_dir, augmentations = None, balance_ratio=1.0, max_bag_size=100):
+        self.labels_df = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.augs = augmentations
+        self.ratio = balance_ratio
+        self.max_bag_size = max_bag_size
+        self.occurrences = {}
+        for row in self.labels_df.itertuples():
+            eye_id = nn_utils.get_video_desc(row.image)['eye_id']
+            entry = self.occurrences.get(eye_id)
+            self.occurrences[eye_id] = self.occurrences[eye_id] + 1 if entry else 1
+        self.bags = self._create_bags()
+
+    def __len__(self):
+        num_bags = 0
+        for eye in self.occurrences.values():
+            num_bags += (1 if eye <= self.max_bag_size else int(np.ceil(eye / self.max_bag_size)))
+        return num_bags
+
+    def __getitem__(self, idx):
+        assert not torch.is_tensor(idx)
+        bag = self.bags[idx]
+        prefix = 'pos' if bag['label'] == 1 else 'neg'
+
+        sample = {'frames': [], 'label': bag['label'], 'name': bag['name'][:5]}
+        for name in bag['frames']:
+            img = cv2.imread(os.path.join(self.root_dir, prefix, name))
+            img = self.augs(image=img)['image'] if self.augs else img
+            sample['frames'].append(img)
+
+        sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
+        return sample
+
+    def _create_bags(self):
+        bags = []
+        for eye, value in self.occurrences.items():
+            bag_label = self.labels_df[self.labels_df.image.str.contains(eye)].iloc[0].level
+            prefix = 'pos' if bag_label == 1 else 'neg'
+            eye_frames = [f for f in os.listdir(join(self.root_dir, prefix)) if get_video_desc(f)['eye_id'] == eye]
+            if value <= self.max_bag_size:
+                bags.append({'frames': eye_frames, 'label': bag_label, 'name': f'{eye}_{0}'})
+            else:
+                for i, start_idx in enumerate(range(0, len(eye_frames), self.max_bag_size)):
+                    bags.append({'frames': eye_frames[start_idx:start_idx+self.max_bag_size], 'label': bag_label, 'name': f'{eye}_{i}'})
+        return bags
+
+
+########################## Dataset Helper Methods #########################
+def get_validation_pipeline(image_size, crop_size):
+    return A.Compose([
+        A.Resize(image_size, image_size, always_apply=True, p=1.0),
+        A.CenterCrop(crop_size, crop_size, always_apply=True, p=1.0),
+        A.Normalize(always_apply=True, p=1.0),
+        ToTensorV2(always_apply=True, p=1.0)
+    ], p=1.0)
+
+
+def get_training_pipeline(image_size, crop_size, strength=0):
+    if strength == 0:
+        return A.Compose([
+            A.Resize(image_size, image_size, always_apply=True, p=1.0),
+            A.RandomCrop(crop_size, crop_size, always_apply=True, p=1.0),
+            A.HorizontalFlip(p=0.5),
+            A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.3),
+            A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT,
+                               value=0,
+                               p=0.5),
+            A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
+            A.OneOf([A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.5),
+            A.Normalize(always_apply=True, p=1.0),
+            ToTensorV2(always_apply=True, p=1.0)
+        ], p=1.0)
+    else:
+        return None
