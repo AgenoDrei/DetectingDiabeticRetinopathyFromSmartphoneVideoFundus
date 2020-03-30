@@ -39,7 +39,6 @@ class RetinaNet2(nn.Module):
         super(RetinaNet2, self).__init__()
         self.stump = frame_stump
         self.pool_stump = do_avg_pooling
-        self.num_frames = num_frames
         self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (
         98304, 1024)  # fix for higher resolutions / different networks
         self.out_stump = self.pool_params[0]
@@ -60,4 +59,44 @@ class RetinaNet2(nn.Module):
         h = torch.max(h, 0, keepdim=True)[0]  # Temproal pooling over 1 dim
 
         out = self.after_pooling(h)
+        return out
+
+
+class BagNet(nn.Module):
+    def __init__(self, stump):
+        super(BagNet, self).__init__()
+        self.stump = stump
+        self.L = 4096               # FC layer size of AlexNet
+        self.D = 256
+        self.K = 1                  # Just why, paper, whyyyy? -> Vector reasons, maybe?
+        self.feature_extractor_part1 = stump.features
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...
+        self.feature_extractor_part2 = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(256 * 6 * 6, self.L),                           # 256: Channel size of AlexNet features
+            nn.ReLU(inplace=True),
+            nn.Dropout(),
+            nn.Linear(self.L, self.L),
+            nn.ReLU(inplace=True),
+        )
+        self.attention = nn.Sequential(
+            nn.Linear(self.L, self.D),
+            nn.Tanh(),
+            nn.Linear(self.D, self.K)
+        )
+        self.classifier = nn.Linear(self.L * self.K, 1)
+
+    def forward(self, x):
+        x = x.squeeze(0)
+        H = self.feature_extractor_part1(x)
+        H = self.avgpool(H)
+        H = H.view(-1, 256 * 6 * 6)
+        H = self.feature_extractor_part2(H) # N x L, Number of bag elements
+
+        A = self.attention(H)  # N x K
+        A = torch.transpose(A, 1, 0)  # K x N
+        A = nn.functional.softmax(A, dim=1)  # softmax over N
+
+        M = torch.mm(A, H)  # K x L, multiply attention weights with bag elements
+        out = self.classifier(M)
         return out
