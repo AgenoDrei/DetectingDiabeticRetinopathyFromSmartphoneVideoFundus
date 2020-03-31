@@ -67,7 +67,7 @@ class BagNet(nn.Module):
         super(BagNet, self).__init__()
         self.stump = stump
         self.L = 4096               # FC layer size of AlexNet
-        self.D = 256
+        self.D = 512
         self.K = 1                  # Just why, paper, whyyyy? -> Vector reasons, maybe?
         self.feature_extractor_part1 = stump.features
         self.avgpool = nn.AdaptiveAvgPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...

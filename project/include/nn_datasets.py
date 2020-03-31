@@ -295,6 +295,11 @@ class PaxosBags(Dataset):
         sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
         return sample
 
+    def get_weight(self, idx):
+        assert not torch.is_tensor(idx)
+        bag = self.bags[idx]
+        return self.ratio if bag['label'] == 0 else 1.0
+
     def _create_bags(self):
         bags = []
         for eye, value in self.occurrences.items():
