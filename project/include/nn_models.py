@@ -64,13 +64,13 @@ class RetinaNet2(nn.Module):
 
 class BagNet(nn.Module):
     def __init__(self, stump):
-        super(BagNet, self).__init__()
+        super(BagNet, num_attention_neurons=128, self).__init__()
         self.stump = stump
         self.L = 4096               # FC layer size of AlexNet
-        self.D = 512
+        self.D = num_attention_neurons
         self.K = 1                  # Just why, paper, whyyyy? -> Vector reasons, maybe?
         self.feature_extractor_part1 = stump.features
-        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...
+        self.pool = nn.AdaptiveAvgPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...
         self.feature_extractor_part2 = nn.Sequential(
             nn.Dropout(),
             nn.Linear(256 * 6 * 6, self.L),                           # 256: Channel size of AlexNet features
@@ -84,12 +84,15 @@ class BagNet(nn.Module):
             nn.Tanh(),
             nn.Linear(self.D, self.K)
         )
-        self.classifier = nn.Linear(self.L * self.K, 1)
+        self.classifier = nn.Sequential(
+            nn.Linear(self.L * self.K, 1),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
         x = x.squeeze(0)
         H = self.feature_extractor_part1(x)
-        H = self.avgpool(H)
+        H = self.pool(H)
         H = H.view(-1, 256 * 6 * 6)
         H = self.feature_extractor_part2(H) # N x L, Number of bag elements
 
@@ -98,5 +101,22 @@ class BagNet(nn.Module):
         A = nn.functional.softmax(A, dim=1)  # softmax over N
 
         M = torch.mm(A, H)  # K x L, multiply attention weights with bag elements
-        out = self.classifier(M)
-        return out
+        y_prob = self.classifier(M)
+        y_pred = torch.ge(y_prob, 0.5).float()
+        return y_prob, y_pred, A
+
+    def calculate_classification_error(self, X, Y):
+        Y = Y.float()
+        _, Y_hat, _ = self.forward(X)
+        error = 1. - Y_hat.eq(Y).cpu().float().mean().item()
+
+        return error, Y_hat
+
+    def calculate_objective(self, X, Y):
+        Y = Y.float()
+        Y_prob, _, A = self.forward(X)
+        Y_prob = torch.clamp(Y_prob, min=1e-5, max=1. - 1e-5)
+        neg_log_likelihood = -1. * (Y * torch.log(Y_prob) + (1. - Y) * torch.log(1. - Y_prob))  # negative log bernoulli
+
+        return neg_log_likelihood, A
+

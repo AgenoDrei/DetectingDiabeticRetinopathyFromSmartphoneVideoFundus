@@ -1,7 +1,7 @@
 import os
 from collections import Counter
 from os.path import join
-
+import random
 import cv2
 import nn_utils
 import numpy as np
@@ -306,11 +306,13 @@ class PaxosBags(Dataset):
             bag_label = self.labels_df[self.labels_df.image.str.contains(eye)].iloc[0].level
             prefix = 'pos' if bag_label == 1 else 'neg'
             eye_frames = [f for f in os.listdir(join(self.root_dir, prefix)) if get_video_desc(f)['eye_id'] == eye]
+            #random.shuffle(eye_frames)
             if value <= self.max_bag_size:
                 bags.append({'frames': eye_frames, 'label': bag_label, 'name': f'{eye}_{0}'})
             else:
                 for i, start_idx in enumerate(range(0, len(eye_frames), self.max_bag_size)):
                     bags.append({'frames': eye_frames[start_idx:start_idx+self.max_bag_size], 'label': bag_label, 'name': f'{eye}_{i}'})
+        print('Created bags: ', len(bags), self.occurrences)
         return bags
 
 

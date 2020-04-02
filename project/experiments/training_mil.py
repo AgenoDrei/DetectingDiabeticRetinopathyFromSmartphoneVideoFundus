@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torchvision import models
 from tqdm import tqdm
+from typing import Tuple
 
 
 def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
@@ -30,6 +31,8 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'crop_size': 399,
         'pretraining': True,
         'preprocessing': False,
+        'attention_neurons': 1024,
+        'bag_size': 100
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
@@ -54,30 +57,36 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
-    train_dataset = PaxosBags('labels_train_frames.csv', os.path.join(data_path, 'train'), augmentations=aug_train,
-                              balance_ratio=hp['balance'])
-    val_dataset = PaxosBags('labels_val_frames.csv', os.path.join(data_path, 'val'), augmentations=aug_val,
-                            balance_ratio=hp['balance'])
+    print('Preparing dataset...')
+    train_dataset = PaxosBags(os.path.join(data_path, 'labels_train_frames.csv'), os.path.join(data_path, 'train'), augmentations=aug_train,
+                              balance_ratio=hp['balance'], max_bag_size=hp['bag_size'])
+    val_dataset = PaxosBags(os.path.join(data_path, 'labels_val_frames.csv'), os.path.join(data_path, 'val'), augmentations=aug_val, hp['bag_size'])
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=1, pin_memory=True,
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True,
                               sampler=sampler)
     test_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
     return [train_loader, test_loader]
 
 
 def prepare_network(model_path, hp, device):
+    print('Preparing network...')
     stump: models.AlexNet = models.alexnet(pretrained=True)
+    num_features = stump.classifier[-1].in_features
+    stump.classifier[-1] = nn.Linear(num_features, 2)
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.to(device)
-    return BagNet(stump)  # Uncool brother of the Nanananannanan Bat-Net
+    net = BagNet(stump, num_attention_neurons=hp['attention_neurons')
+    net.to(device)
+    return net          # Uncool brother of the Nanananannanan Bat-Net
 
 
 def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, hp, num_epochs=50,
                 description='Vanilla'):
+    print('Training model...')
     since = time.time()
     best_f1_val = -1
     best_model_path = None
@@ -91,19 +100,19 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
             inputs = batch['frames'].to(device, dtype=torch.float)
-            labels = batch['label'].to(device)
+            label = batch['label'].to(device)
 
             model.train()
             optimizer.zero_grad()
-            outputs = model(inputs)
-            _, pred = torch.max(outputs, 1)
 
-            loss = criterion(outputs, labels)
+            loss, _ = model.calculate_objective(inputs, label)
+            error, pred = model.calculate_classification_error(inputs, label)
+            
             loss.backward()
             optimizer.step()
 
-            scores.add(pred, labels)
-            running_loss += loss.item() * inputs.size(0)
+            scores.add(pred, label)
+            running_loss += loss.item()
 
         train_scores = scores.calc_scores(as_dict=True)
         train_scores['loss'] = running_loss / len(loaders[0].dataset)
@@ -127,22 +136,19 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=False) -> Tuple[float, float]:
     model.eval()
     running_loss = 0.0
-    sm = torch.nn.Sigmoid()
     scores = Scores()
 
     for i, batch in enumerate(loader):
-        inputs = batch['image'].to(device, dtype=torch.float)
+        inputs = batch['frames'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         eye_ids = batch['name']
 
         with torch.no_grad():
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            _, preds = torch.max(outputs, 1)
-            probs = sm(outputs)
-            running_loss += loss.item() * inputs.size(0)
+            loss, attention_weights = model.calculate_objective(inputs, labels)
+            error, preds = model.calculate_classification_error(inputs, labels) 
+            running_loss += loss.item()
 
-        scores.add(preds, labels, tags=eye_ids, probs=probs)
+        scores.add(preds, labels, tags=eye_ids)
 
     val_scores = scores.calc_scores(as_dict=True)
     val_scores['loss'] = running_loss / len(loader.dataset)
