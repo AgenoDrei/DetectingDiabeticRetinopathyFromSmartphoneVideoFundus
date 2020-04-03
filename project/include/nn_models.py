@@ -63,14 +63,14 @@ class RetinaNet2(nn.Module):
 
 
 class BagNet(nn.Module):
-    def __init__(self, stump):
-        super(BagNet, num_attention_neurons=128, self).__init__()
+    def __init__(self, stump, num_attention_neurons=128):
+        super(BagNet, self).__init__()
         self.stump = stump
         self.L = 4096               # FC layer size of AlexNet
         self.D = num_attention_neurons
         self.K = 1                  # Just why, paper, whyyyy? -> Vector reasons, maybe?
         self.feature_extractor_part1 = stump.features
-        self.pool = nn.AdaptiveAvgPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...
+        self.pool = nn.AdaptiveMaxPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...
         self.feature_extractor_part2 = nn.Sequential(
             nn.Dropout(),
             nn.Linear(256 * 6 * 6, self.L),                           # 256: Channel size of AlexNet features

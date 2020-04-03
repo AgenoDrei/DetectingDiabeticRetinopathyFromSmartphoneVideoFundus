@@ -20,8 +20,8 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     print(f'Using device {device}')
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(data_path)),
-        'learning_rate': 1e-4,
-        'weight_decay': 1e-5,
+        'learning_rate': 3e-4,
+        'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
@@ -53,14 +53,14 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
     best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
                                   hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    # validate model
+    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
     print('Preparing dataset...')
     train_dataset = PaxosBags(os.path.join(data_path, 'labels_train_frames.csv'), os.path.join(data_path, 'train'), augmentations=aug_train,
                               balance_ratio=hp['balance'], max_bag_size=hp['bag_size'])
-    val_dataset = PaxosBags(os.path.join(data_path, 'labels_val_frames.csv'), os.path.join(data_path, 'val'), augmentations=aug_val, hp['bag_size'])
+    val_dataset = PaxosBags(os.path.join(data_path, 'labels_val_frames.csv'), os.path.join(data_path, 'val'), augmentations=aug_val, max_bag_size=hp['bag_size'])
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -79,7 +79,7 @@ def prepare_network(model_path, hp, device):
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.to(device)
-    net = BagNet(stump, num_attention_neurons=hp['attention_neurons')
+    net = BagNet(stump, num_attention_neurons=hp['attention_neurons'])
     net.to(device)
     return net          # Uncool brother of the Nanananannanan Bat-Net
 
@@ -152,7 +152,11 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
 
     val_scores = scores.calc_scores(as_dict=True)
     val_scores['loss'] = running_loss / len(loader.dataset)
-    if not calc_roc: write_scores(writer, 'val', val_scores, cur_epoch)
+    if not calc_roc:
+        write_scores(writer, 'val', val_scores, cur_epoch)
+    else:
+        writer.add_hparams(hparam_dict=hp, metric_dict=val_scores)
+    
     return running_loss / len(loader.dataset), val_scores['f1']
 
 
