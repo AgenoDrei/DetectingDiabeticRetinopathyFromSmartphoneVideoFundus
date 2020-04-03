@@ -32,7 +32,9 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'pretraining': True,
         'preprocessing': False,
         'attention_neurons': 1024,
-        'bag_size': 100
+        'bag_size': 100,
+        'attention': 'normal',          # normal / gated
+        'pooling': 'avg'                # avg / max / none
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
@@ -53,7 +55,7 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
     best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
                                   hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    validate(prepare_network(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
@@ -79,9 +81,10 @@ def prepare_network(model_path, hp, device):
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.to(device)
-    net = BagNet(stump, num_attention_neurons=hp['attention_neurons'])
+    net = BagNet(stump, num_attention_neurons=hp['attention_neurons'], attention_strategy=hp['attention'],
+                 pooling_strategy=hp['pooling'])  # Uncool brother of the Nanananannanan Bat-Net
     net.to(device)
-    return net          # Uncool brother of the Nanananannanan Bat-Net
+    return net
 
 
 def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, hp, num_epochs=50,

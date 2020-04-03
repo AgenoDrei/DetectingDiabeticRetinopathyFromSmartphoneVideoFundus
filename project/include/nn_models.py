@@ -9,7 +9,7 @@ class RetinaNet(nn.Module):
         self.pool_stump = do_avg_pooling
         self.num_frames = num_frames
         self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (
-        98304, 1024)  # fix for higher resolutions / different networks
+            98304, 1024)  # fix for higher resolutions / different networks
         self.out_stump = self.pool_params[0]
 
         self.avg_pooling = self.stump.avg_pool
@@ -40,7 +40,7 @@ class RetinaNet2(nn.Module):
         self.stump = frame_stump
         self.pool_stump = do_avg_pooling
         self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (
-        98304, 1024)  # fix for higher resolutions / different networks
+            98304, 1024)  # fix for higher resolutions / different networks
         self.out_stump = self.pool_params[0]
 
         self.avg_pooling = self.stump.avg_pool
@@ -63,27 +63,25 @@ class RetinaNet2(nn.Module):
 
 
 class BagNet(nn.Module):
-    def __init__(self, stump, num_attention_neurons=128):
+    def __init__(self, stump, num_attention_neurons=128, attention_strategy='normal', pooling_strategy='avg'):
         super(BagNet, self).__init__()
         self.stump = stump
-        self.L = 4096               # FC layer size of AlexNet
+        self.attention_strategy = attention_strategy
+        self.L = 4096  # FC layer size of AlexNet
         self.D = num_attention_neurons
-        self.K = 1                  # Just why, paper, whyyyy? -> Vector reasons, maybe?
+        self.K = 1  # Just why, paper, whyyyy? -> Vector reasons, maybe?
         self.feature_extractor_part1 = stump.features
-        self.pool = nn.AdaptiveMaxPool2d((6, 6))                 # Should I use you? Replace by Max? No idea...
+        self.pool, self.num_features = self._get_pooling_params(
+            pooling_strategy)  # Should I use you? Replace by Max? No idea...
         self.feature_extractor_part2 = nn.Sequential(
             nn.Dropout(),
-            nn.Linear(256 * 6 * 6, self.L),                           # 256: Channel size of AlexNet features
+            nn.Linear(self.num_features, self.L),  # 256: Channel size of AlexNet features
             nn.ReLU(inplace=True),
             nn.Dropout(),
             nn.Linear(self.L, self.L),
             nn.ReLU(inplace=True),
         )
-        self.attention = nn.Sequential(
-            nn.Linear(self.L, self.D),
-            nn.Tanh(),
-            nn.Linear(self.D, self.K)
-        )
+        self.attention = self._get_attention_net(attention_strategy)
         self.classifier = nn.Sequential(
             nn.Linear(self.L * self.K, 1),
             nn.Sigmoid()
@@ -94,9 +92,15 @@ class BagNet(nn.Module):
         H = self.feature_extractor_part1(x)
         H = self.pool(H)
         H = H.view(-1, 256 * 6 * 6)
-        H = self.feature_extractor_part2(H) # N x L, Number of bag elements
+        H = self.feature_extractor_part2(H)  # N x L, Number of bag elements
 
-        A = self.attention(H)  # N x K
+        if self.attention_strategy == 'normal':
+            A = self.attention(H)  # N x K
+        else:
+            A_V = self.attention['attention_V'](H)  # NxD
+            A_U = self.attention['attention_U'](H)  # NxD
+            A = self.attention['attention_weights'](A_V * A_U)  # element wise multiplication # NxK
+
         A = torch.transpose(A, 1, 0)  # K x N
         A = nn.functional.softmax(A, dim=1)  # softmax over N
 
@@ -120,3 +124,25 @@ class BagNet(nn.Module):
 
         return neg_log_likelihood, A
 
+    def _get_pooling_params(self, strategy='avg'):
+        if strategy == 'avg':
+            return nn.AdaptiveAvgPool2d((6, 6)), (256 * 6 * 6)
+        elif strategy == 'max':
+            return nn.AdaptiveMaxPool2d((6, 6)), (256 * 6 * 6)
+        else:
+            nn.Identity(), (256 * 11 * 11)
+
+    def _get_attention_net(self, strategy='normal'):
+        if strategy == 'normal':
+            return nn.Sequential(
+                nn.Linear(self.L, self.D),
+                nn.Tanh(),
+                nn.Linear(self.D, self.K)
+            )
+        elif strategy == 'gated':
+            return {'attention_V': nn.Sequential(
+                nn.Linear(self.L, self.D),
+                nn.Tanh()), 'attention_U': nn.Sequential(
+                nn.Linear(self.L, self.D),
+                nn.Sigmoid()), 'attention_weights': nn.Linear(self.D, self.K)
+            }
