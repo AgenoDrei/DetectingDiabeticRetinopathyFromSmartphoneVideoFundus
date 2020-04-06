@@ -109,3 +109,5 @@ project/experiments/output/
 project/experiments/C001R/
 project/experiments/runs/
 project/models/
+
+/**/*.pth

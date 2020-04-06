@@ -308,7 +308,7 @@ class PaxosBags(Dataset):
             eye_frames = [f for f in os.listdir(join(self.root_dir, prefix)) if get_video_desc(f)['eye_id'] == eye]
             #random.shuffle(eye_frames)
             if value <= self.max_bag_size:
-                bags.append({'frames': eye_frames, 'label': bag_label, 'name': f'{eye}_{0}'})
+                bags.append({'frames': eye_frames, 'label': bag_label, 'name': f'{eye}_{0}', 'shortname': eye})
             else:
                 for i, start_idx in enumerate(range(0, len(eye_frames), self.max_bag_size)):
                     bags.append({'frames': eye_frames[start_idx:start_idx+self.max_bag_size], 'label': bag_label, 'name': f'{eye}_{i}'})

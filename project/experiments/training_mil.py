@@ -20,7 +20,7 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     print(f'Using device {device}')
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(data_path)),
-        'learning_rate': 3e-4,
+        'learning_rate': 1e-4,
         'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
@@ -32,9 +32,9 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'pretraining': True,
         'preprocessing': False,
         'attention_neurons': 1024,
-        'bag_size': 100,
+        'bag_size': 50,
         'attention': 'normal',          # normal / gated
-        'pooling': 'avg'                # avg / max / none
+        'pooling': 'max'                # avg / max / none
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
@@ -48,14 +48,14 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
-    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
+    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=15, verbose=True)
 
     desc = f'_paxos_mil_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
 
     best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
                                   hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    validate(prepare_network(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    validate(prepare_network(best_model_path, hyperparameter, device, whole_net=True), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
@@ -72,17 +72,23 @@ def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
     return [train_loader, test_loader]
 
 
-def prepare_network(model_path, hp, device):
+def prepare_network(model_path, hp, device, whole_net=False):
     print('Preparing network...')
     stump: models.AlexNet = models.alexnet(pretrained=True)
     num_features = stump.classifier[-1].in_features
     stump.classifier[-1] = nn.Linear(num_features, 2)
-    if hp['pretraining']:
+    if hp['pretraining'] and not whole_net:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.to(device)
     net = BagNet(stump, num_attention_neurons=hp['attention_neurons'], attention_strategy=hp['attention'],
                  pooling_strategy=hp['pooling'])  # Uncool brother of the Nanananannanan Bat-Net
+    if whole_net:
+        net.load_state_dict(torch.load(model_path, map_location=device))
+    if hp['attention'] == 'gated':
+        net.attention['attention_U'].to(device)
+        net.attention['attention_V'].to(device)
+        net.attention['attention_weights'].to(device)
     net.to(device)
     return net
 
@@ -124,7 +130,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
+            torch.save(model.stump.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
             best_model_path = f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
 
         scheduler.step(val_loss)
@@ -141,7 +147,7 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
     running_loss = 0.0
     scores = Scores()
 
-    for i, batch in enumerate(loader):
+    for i, batch in tqdm(enumerate(loader), total=len(loader), desc='Validation'):
         inputs = batch['frames'].to(device, dtype=torch.float)
         labels = batch['label'].to(device)
         eye_ids = batch['name']
@@ -157,6 +163,8 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
     val_scores['loss'] = running_loss / len(loader.dataset)
     if not calc_roc:
         write_scores(writer, 'val', val_scores, cur_epoch)
+        eye_scores = scores.calc_scores_eye(as_dict=True)
+        write_scores(writer, 'eval', eye_scores, cur_epoch)
     else:
         writer.add_hparams(hparam_dict=hp, metric_dict=val_scores)
     

@@ -27,7 +27,7 @@ def get_free_gpus(query):
     for gpu in query.gpus:
         usage = gpu['memory.used'] / gpu['memory.total']
         procs = gpu['processes']
-        if usage < 0.5 and (procs is None or len(procs) <= 1):
+        if usage < 0.25 and (procs is None or len(procs) <= 1):
             free_gpus.append((gpu.index, f'{usage:0.2f}'))
 
     return free_gpus
