@@ -85,10 +85,6 @@ def prepare_network(model_path, hp, device, whole_net=False):
                  pooling_strategy=hp['pooling'])  # Uncool brother of the Nanananannanan Bat-Net
     if whole_net:
         net.load_state_dict(torch.load(model_path, map_location=device))
-    if hp['attention'] == 'gated':
-        net.attention['attention_U'].to(device)
-        net.attention['attention_V'].to(device)
-        net.attention['attention_weights'].to(device)
     net.to(device)
     return net
 
