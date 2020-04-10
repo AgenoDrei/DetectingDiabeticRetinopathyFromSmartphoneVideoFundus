@@ -32,7 +32,7 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'pretraining': True,
         'preprocessing': False,
         'attention_neurons': 1024,
-        'bag_size': 50,
+        'bag_size': 100,
         'attention': 'normal',          # normal / gated
         'pooling': 'max'                # avg / max / none
     }
@@ -45,7 +45,10 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     loaders = prepare_dataset(data_path, hyperparameter, aug_pipeline_train, aug_pipeline_val, num_workers)
     net = prepare_network(model_path, hyperparameter, device)
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
+    optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
+                               {'params': net.feature_extractor_part2.parameters(), 'lr': 1e-5},
+                               {'params': net.attention.parameters()},
+                               {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=15, verbose=True)
@@ -126,8 +129,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.stump.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
-            best_model_path = f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
+            torch.save(model.stump.state_dict(), f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth')
+            best_model_path = f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth'
 
         scheduler.step(val_loss)
 

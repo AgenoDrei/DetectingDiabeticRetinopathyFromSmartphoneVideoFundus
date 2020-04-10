@@ -72,14 +72,15 @@ class BagNet(nn.Module):
         self.K = 1  # Just why, paper, whyyyy? -> Vector reasons, maybe?
         self.feature_extractor_part1 = stump.features
         self.pool, self.num_features = self._get_pooling_params(pooling_strategy)  
-        self.feature_extractor_part2 = nn.Sequential(
-            nn.Dropout(),
-            nn.Linear(self.num_features, self.L),  # 256: Channel size of AlexNet features
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(self.L, self.L),
-            nn.ReLU(inplace=True),
-        )
+        #self.feature_extractor_part2 = nn.Sequential(
+        #    nn.Dropout(),
+        #    nn.Linear(self.num_features, self.L),  # 256: Channel size of AlexNet features
+        #    nn.ReLU(inplace=True),
+        #    nn.Dropout(),
+        #    nn.Linear(self.L, self.L),
+        #    nn.ReLU(inplace=True),
+        #)
+        self.feature_extractor_part2 = stump.classifier[:-1]
         self.attention, self.att_v, self.att_u, self.att_weights = self._get_attention_net(attention_strategy)
         self.classifier = nn.Sequential(
             nn.Linear(self.L * self.K, 1),
