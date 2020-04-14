@@ -26,13 +26,13 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
-        'balance': 0.45,
+        'balance': 0.4,
         'image_size': 450,
         'crop_size': 399,
         'pretraining': True,
         'preprocessing': False,
-        'attention_neurons': 1024,
-        'bag_size': 100,
+        'attention_neurons': 2048,
+        'bag_size': 300,
         'attention': 'normal',          # normal / gated
         'pooling': 'max'                # avg / max / none
     }
@@ -46,7 +46,7 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     net = prepare_network(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
-                               {'params': net.feature_extractor_part2.parameters(), 'lr': 1e-5},
+                               {'params': net.feature_extractor_part2.parameters()}, #'lr': 1e-5},
                                {'params': net.attention.parameters()},
                                {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
