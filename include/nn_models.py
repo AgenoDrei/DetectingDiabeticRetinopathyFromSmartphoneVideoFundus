@@ -35,15 +35,15 @@ class RetinaNet(nn.Module):
 
 
 class RetinaNet2(nn.Module):
-    def __init__(self, frame_stump, num_frames=20, do_avg_pooling=True):
+    def __init__(self, frame_stump, num_frames=20, pooling_strategy='max'):
         super(RetinaNet2, self).__init__()
         self.stump = frame_stump
-        self.pool_stump = do_avg_pooling
+        self.pooling_strategy = pooling_strategy
         self.pool_params = (self.stump.last_linear.in_features, 256) if self.pool_stump else (
             98304, 1024)  # fix for higher resolutions / different networks
         self.out_stump = self.pool_params[0]
 
-        self.avg_pooling = self.stump.avg_pool
+        self.pooling = self.stump.avg_pool if pooling_strategy == 'avg' else nn.MaxPool2d(self.stump.avg_pool.kernel_size, stride=self.stump.avg_pool.stride)
         self.after_pooling = nn.Sequential(
             nn.Dropout(),
             nn.Linear(self.out_stump, self.pool_params[1]),
@@ -54,10 +54,9 @@ class RetinaNet2(nn.Module):
     def forward(self, x):
         x = torch.squeeze(x, dim=0)
         x = self.stump.features(x)
-        h = self.avg_pooling(x) if self.pool_stump else x
+        h = self.pooling(x)
         h = h.view(h.size(0), -1)  # Flatten results for fc / pooling
         h = torch.max(h, 0, keepdim=True)[0]  # Temproal pooling over 1 dim
-
         out = self.after_pooling(h)
         return out
 

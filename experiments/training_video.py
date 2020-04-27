@@ -35,12 +35,13 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'image_size': 320,
-        'crop_size': 299,
+        'image_size': 450,
+        'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.4,
         'num_frames': 30,
-        'stump_pooling': False,
+        'pooling': 'max', # max / avg
+        'bag': 'snippet', # snippet / random / snippet sampling
         'pretraining': True,
         'preprocessing': False
     }
@@ -74,10 +75,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
     net: RetinaNet = prepare_model(model_path, hyperparameter, device)
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
-                              weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam(net.parameters(), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
-    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
+    plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=15, verbose=True)
 
     desc = f'_video_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
@@ -101,7 +101,7 @@ def prepare_model(model_path, hp, device):
                 param.requires_grad = False
             dfs_freeze(child)
 
-    net = RetinaNet2(frame_stump=stump, do_avg_pooling=hp['stump_pooling'], num_frames=hp['num_frames'])
+    net = RetinaNet2(frame_stump=stump, do_avg_pooling=hp['pooling'], num_frames=hp['num_frames'])
     return net
 
 
@@ -109,9 +109,9 @@ def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = SnippetDataset2(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]),
                                     augmentations=aug_pipeline_train, balance_ratio=hp['balance'],
-                                    num_frames=hp['num_frames'])
+                                    num_frames=hp['num_frames'], bagging_strategy=hp['bag'])
     val_dataset = SnippetDataset2(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]),
-                                  augmentations=aug_pipeline_val, num_frames=hp['num_frames'])
+                                  augmentations=aug_pipeline_val, num_frames=hp['num_frames'], bagging_strategy=hp['bag'])
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)

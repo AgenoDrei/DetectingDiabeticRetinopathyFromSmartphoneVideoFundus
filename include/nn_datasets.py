@@ -206,13 +206,14 @@ class SnippetDataset(Dataset):
 
 
 class SnippetDataset2(Dataset):
-    def __init__(self, csv_file, root_dir, num_frames=20, file_type='.png', balance_ratio=1.0, augmentations=None):
+    def __init__(self, csv_file, root_dir, num_frames=20, file_type='.png', balance_ratio=1.0, augmentations=None, bagging_strategy='snippet'):
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.file_type = file_type
         self.augs = augmentations
         self.ratio = balance_ratio
         self.num_frames = num_frames
+        self.bag_strategy = bagging_strategy
 
     def __len__(self):
         return len(self.labels_df)
@@ -226,28 +227,31 @@ class SnippetDataset2(Dataset):
         prefix = 'pos' if severity == 1 else 'neg'
 
         snip_name = self.labels_df.iloc[image_idx, 0]
-        video_desc = get_video_desc(snip_name)
+        snip_desc = get_video_desc(snip_name)
 
         video_all_frames = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if
-                            video_desc['eye_id'] == get_video_desc(f)['eye_id']]
-        '''
-        snippet_list = list(set([get_video_desc(f)['snippet_id'] for f in video_all_frames]))
-        selected_snippets = np.random.choice(snippet_list, self.num_frames)
-        selected_frames = []
-        for snippet in selected_snippets:
-            selected_frame_idx = np.random.randint(0, 20)
-            selected_frames.append(
-                [f for f in video_all_frames if int(snippet) == get_video_desc(f)['snippet_id']][selected_frame_idx])
+                            snip_desc['eye_id'] == get_video_desc(f)['eye_id']]
 
-        '''
-        frame_names = sorted([f for f in video_all_frames if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
-        selection = np.random.randint(0, len(video_all_frames), self.num_frames) # Generate random indicies
-        selected_frames = [video_all_frames[idx] for idx in selection]
+        if self.bag_strategy == 'snippet':
+            snippet_frames = sorted(
+                [f for f in video_all_frames if snip_desc['snippet_id'] == get_video_desc(f)['snippet_id']],
+                key=lambda n: get_video_desc(n)['frame_id'])
+            selected_frames = snippet_frames
+        elif self.bag_strategy == 'random':
+            selection = np.random.randint(0, len(video_all_frames), self.num_frames)  # Generate random indicies
+            selected_frames = [video_all_frames[idx] for idx in selection]
+        else:
+            snippet_list = list(set([get_video_desc(f)['snippet_id'] for f in video_all_frames]))
+            selected_snippets = np.random.choice(snippet_list, self.num_frames)
+            selected_frames = []
+            for snippet in selected_snippets:
+                selected_frame_idx = np.random.randint(0, 20)
+                selected_frames.append(
+                    [f for f in video_all_frames if int(snippet) == get_video_desc(f)['snippet_id']][selected_frame_idx])
 
-        sample = {'frames': {}, 'label': severity, 'name': video_desc['eye_id'][:5]}
+        sample = {'frames': {}, 'label': severity, 'name': snip_desc['eye_id'][:5]}
         for i, name in enumerate(selected_frames):
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
-            # img = self.augs(image=img)['image'] if self.augs else img
             sample_name = 'image' + (str(i) if i != 0 else '')
             sample['frames'][sample_name] = img
 
