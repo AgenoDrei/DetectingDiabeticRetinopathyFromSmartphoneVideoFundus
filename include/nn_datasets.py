@@ -230,6 +230,7 @@ class SnippetDataset2(Dataset):
 
         video_all_frames = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if
                             video_desc['eye_id'] == get_video_desc(f)['eye_id']]
+        '''
         snippet_list = list(set([get_video_desc(f)['snippet_id'] for f in video_all_frames]))
         selected_snippets = np.random.choice(snippet_list, self.num_frames)
         selected_frames = []
@@ -238,9 +239,10 @@ class SnippetDataset2(Dataset):
             selected_frames.append(
                 [f for f in video_all_frames if int(snippet) == get_video_desc(f)['snippet_id']][selected_frame_idx])
 
-        # frame_names = sorted([f for f in files if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
-        # selection = np.random.randint(0, len(video_all_frames), self.num_frames) # Generate random indicies
-        # selected_frames = [video_all_frames[idx] for idx in selection]
+        '''
+        frame_names = sorted([f for f in video_all_frames if video_desc['snippet_id'] == get_video_desc(f)['snippet_id']], key=lambda n: get_video_desc(n)['frame_id'])
+        selection = np.random.randint(0, len(video_all_frames), self.num_frames) # Generate random indicies
+        selected_frames = [video_all_frames[idx] for idx in selection]
 
         sample = {'frames': {}, 'label': severity, 'name': video_desc['eye_id'][:5]}
         for i, name in enumerate(selected_frames):

@@ -63,11 +63,12 @@ class RetinaNet2(nn.Module):
 
 
 class BagNet(nn.Module):
-    def __init__(self, stump, num_attention_neurons=128, attention_strategy='normal', pooling_strategy='avg'):
+    def __init__(self, stump, num_attention_neurons=128, attention_strategy='normal', pooling_strategy='avg', stump_type='alexnet'):
         super(BagNet, self).__init__()
         self.stump = stump
+        self.stump_type = stump_type
         self.attention_strategy = attention_strategy
-        self.L = 4096  # FC layer size of AlexNet
+        self.L = 4096 if stump_type == 'alexnet' else 1536  # FC layer size of AlexNet / Inception
         self.D = num_attention_neurons
         self.K = 1  # Just why, paper, whyyyy? -> Vector reasons, maybe?
         self.feature_extractor_part1 = stump.features
@@ -80,7 +81,12 @@ class BagNet(nn.Module):
         #    nn.Linear(self.L, self.L),
         #    nn.ReLU(inplace=True),
         #)
-        self.feature_extractor_part2 = stump.classifier[:-1]
+        self.feature_extractor_part2 = None
+        if stump_type == 'alexnet':
+             self.feature_extractor_part2 = stump.classifier[:-1]
+        elif stump_type == 'inception':
+            stump.last_linear = nn.Identity()
+            self.feature_extractor_part2 = stump.avg_pool if pooling_strategy == 'avg' else nn.MaxPool2d(stump.avg_pool.kernel_size, stride=stump.avg_pool.stride)
         self.attention, self.att_v, self.att_u, self.att_weights = self._get_attention_net(attention_strategy)
         self.classifier = nn.Sequential(
             nn.Linear(self.L * self.K, 1),
@@ -90,9 +96,12 @@ class BagNet(nn.Module):
     def forward(self, x):
         x = x.squeeze(0)
         H = self.feature_extractor_part1(x)
-        H = self.pool(H)
-        H = H.view(-1, self.num_features)
+        if self.stump_type == 'alexnet':
+            H = self.pool(H)
+            H = H.view(-1, self.num_features)
         H = self.feature_extractor_part2(H)  # N x L, Number of bag elements
+        if self.stump_type == 'inception':
+            H = H.view(-1, 1536)
 
         if self.attention_strategy == 'normal':
             A = self.attention(H)  # N x K

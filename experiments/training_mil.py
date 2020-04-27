@@ -13,15 +13,15 @@ from torch.utils.data import DataLoader
 from torchvision import models
 from tqdm import tqdm
 from typing import Tuple
+from pretrainedmodels.models import inceptionv4
 
-
-def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
+def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num_workers):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(data_path)),
         'learning_rate': 1e-4,
-        'weight_decay': 1e-4,
+        'weight_decay': 3e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
@@ -31,8 +31,9 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'crop_size': 399,
         'pretraining': True,
         'preprocessing': False,
-        'attention_neurons': 2048,
-        'bag_size': 300,
+        'stump': stump_type,
+        'attention_neurons': 512,
+        'bag_size': 35,
         'attention': 'normal',          # normal / gated
         'pooling': 'max'                # avg / max / none
     }
@@ -46,7 +47,7 @@ def run(data_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     net = prepare_network(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
-                               {'params': net.feature_extractor_part2.parameters()}, #'lr': 1e-5},
+                               {'params': net.feature_extractor_part2.parameters(), 'lr': 1e-5},
                                {'params': net.attention.parameters()},
                                {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
                               weight_decay=hyperparameter['weight_decay'])
@@ -77,15 +78,22 @@ def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
 
 def prepare_network(model_path, hp, device, whole_net=False):
     print('Preparing network...')
-    stump: models.AlexNet = models.alexnet(pretrained=True)
-    num_features = stump.classifier[-1].in_features
-    stump.classifier[-1] = nn.Linear(num_features, 2)
+    stump = None
+    if hp['stump'] == 'alexnet':
+        stump: models.AlexNet = models.alexnet(pretrained=True)
+        num_features = stump.classifier[-1].in_features
+        stump.classifier[-1] = nn.Linear(num_features, 2)
+    elif hp['stump'] == 'inception':
+        stump = inceptionv4()
+        num_ftrs = stump.last_linear.in_features
+        stump.last_linear = nn.Linear(num_ftrs, 2)
+
     if hp['pretraining'] and not whole_net:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.to(device)
     net = BagNet(stump, num_attention_neurons=hp['attention_neurons'], attention_strategy=hp['attention'],
-                 pooling_strategy=hp['pooling'])  # Uncool brother of the Nanananannanan Bat-Net
+                 pooling_strategy=hp['pooling'], stump_type=hp['stump'])  # Uncool brother of the Nanananannanan Bat-Net
     if whole_net:
         net.load_state_dict(torch.load(model_path, map_location=device))
     net.to(device)
@@ -181,7 +189,8 @@ if __name__ == '__main__':
     parser.add_argument('--bs', help='Batch size for training', type=int, default=8)
     parser.add_argument('--epochs', help='Number of training epochs', type=int, default=50)
     parser.add_argument('--workers', help='Number of workers', type=int, default=16)
+    parser.add_argument('--stump', help='Type of feature extractor (alexnet, inception)', type=str, default='alexnet')
     args = parser.parse_args()
 
-    run(args.data, args.model, args.gpu, args.bs, args.epochs, args.workers)
+    run(args.data, args.model, args.stump, args.gpu, args.bs, args.epochs, args.workers)
     sys.exit(0)
