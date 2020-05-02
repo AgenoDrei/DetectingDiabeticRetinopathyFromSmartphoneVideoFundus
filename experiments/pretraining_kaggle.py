@@ -18,6 +18,7 @@ from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from pretrainedmodels import inceptionv4
+from efficientnet_pytorch import EfficientNet
 import argparse
 from sklearn.metrics import f1_score, recall_score, precision_score
 from torchvision import models
@@ -35,7 +36,7 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'network': 'AlexNet',
+        'network': 'Efficient',   # AlexNet / VGG / Inception / Efficient 
         'image_size': 450,
         'crop_size': 399,
         'freeze': 0.0,
@@ -83,6 +84,14 @@ def prepare_model(hp):
         net = models.alexnet(pretrained=True)
         num_ftrs = net.classifier[-1].in_features
         net.classifier[-1] = Linear(num_ftrs, 2)
+    elif hp ['network'] == 'VGG':
+        net = models.vgg13_bn(pretrained=True)
+        num_ftrs = net.classifier[-1].in_features
+        net.classifier[-1] = Linear(num_ftrs, 2)
+    elif hp['network'] == 'Efficient':
+        net = EfficientNet.from_pretrained('efficientnet-b3')
+        num_ftrs = net._fc.in_features
+        net._fc = Linear(num_ftrs, 2)
     elif hp['network'] == 'Inception':
         net = inceptionv4()
         num_ftrs = net.last_linear.in_features
@@ -94,7 +103,7 @@ def prepare_model(hp):
                 nn_utils.dfs_freeze(child)
 
     net.train()
-    print(f'Model info: {net.__class__.__name__}, layer: {len(net.features)}, #frozen layer: {len(net.features) * hp["freeze"]}')
+    #print(f'Model info: {net.__class__.__name__}, layer: {len(net)}, #frozen layer: {len(net) * hp["freeze"]}')
     return net
 
 
@@ -148,7 +157,9 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         nn_utils.write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
 
-        best_f1_val = val_f1 if val_f1 > best_f1_val else best_f1_val
+        if val_f1 > best_f1_val:
+            best_f1_val = val_f1
+            torch.save(model.state_dict(), f'best_model_{description}_{val_f1:0.2}.pth')
 
         scheduler.step(val_loss)
 
@@ -156,7 +167,6 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
     validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
-    torch.save(model.state_dict(), f'model{description}')
     return model
 
 

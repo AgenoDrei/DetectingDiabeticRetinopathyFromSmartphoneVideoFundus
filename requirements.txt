@@ -26,3 +26,4 @@ tornado==6.0.3
 tqdm==4.37.0
 pretrainedmodels==0.7.4
 xlrd==1.2.0
+efficientnet-pytorch==0.6.3
