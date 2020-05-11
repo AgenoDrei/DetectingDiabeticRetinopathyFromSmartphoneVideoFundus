@@ -181,6 +181,7 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
     else:
         eye_scores = scores.calc_scores_eye(as_dict=True)
         writer.add_hparams(hparam_dict=hp, metric_dict=eye_scores)
+        scores.data.to_csv(f'{time.strftime("%Y%m%d")}_best_mil_model_{val_scores["f1"]:0.2}.csv', index=False)
     
     return running_loss / len(loader.dataset), eye_scores['f1']
 

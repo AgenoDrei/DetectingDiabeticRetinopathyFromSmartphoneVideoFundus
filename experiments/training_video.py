@@ -41,7 +41,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'balance': 0.4,
         'num_frames': 30,
         'pooling': 'max', # max / avg
-        'bag': 'snippet', # snippet / random / snippet sampling
+        'bag': 'random', # snippet / random / snippet sampling
         'pretraining': True,
         'preprocessing': False
     }
@@ -101,7 +101,7 @@ def prepare_model(model_path, hp, device):
                 param.requires_grad = False
             dfs_freeze(child)
 
-    net = RetinaNet2(frame_stump=stump, do_avg_pooling=hp['pooling'], num_frames=hp['num_frames'])
+    net = RetinaNet2(frame_stump=stump, pooling_strategy=hp['pooling'], num_frames=hp['num_frames'])
     return net
 
 
