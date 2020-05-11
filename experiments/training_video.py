@@ -1,27 +1,21 @@
-import argparse
 import os
+from os.path import join
+import argparse
+import pretrainedmodels as ptm
 import sys
 import time
-from os.path import join
-from typing import Tuple
-import albumentations as A
-import cv2
-import pretrainedmodels as ptm
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from albumentations.augmentations.transforms import RandomBrightnessContrast
-from albumentations.pytorch import ToTensorV2
-from nn_datasets import SnippetDataset, SnippetDataset2
-from nn_models import RetinaNet, RetinaNet2
-from nn_utils import dfs_freeze, calc_scores_from_confusion_matrix, \
-    MajorityDict, write_scores, \
-    write_f1_curve, Scores
-from sklearn.metrics import f1_score, recall_score, precision_score
+from nn_datasets import SnippetDataset2, get_training_pipeline, get_validation_pipeline
+from nn_models import RetinaNet2
+from nn_utils import dfs_freeze, write_scores, \
+    Scores
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from typing import Tuple
 
 
 def run(base_path, model_path, gpu_name, batch_size, num_epochs):
@@ -40,40 +34,19 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'freeze': 0.0,
         'balance': 0.4,
         'num_frames': 30,
-        'pooling': 'max', # max / avg
-        'bag': 'random', # snippet / random / snippet sampling
+        'pooling': 'avg', # max / avg
+        'bag': 'snippet', # snippet / random / snippet sampling
         'pretraining': True,
         'preprocessing': False
     }
-    aug_pipeline_train = A.Compose([
-        A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
-        A.CenterCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
-        A.HorizontalFlip(p=0.5),
-        A.CoarseDropout(min_holes=1, max_holes=3, max_width=75, max_height=75, min_width=25, min_height=25, p=0.5),
-        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=45, border_mode=cv2.BORDER_CONSTANT, value=0,
-                           p=0.5),
-        A.OneOf(
-            [A.GaussNoise(p=0.5), A.ISONoise(p=0.5), A.IAAAdditiveGaussianNoise(p=0.25), A.MultiplicativeNoise(p=0.25)],
-            p=0.3),
-        A.OneOf([A.ElasticTransform(border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5), A.GridDistortion(p=0.5)], p=0.25),
-        A.OneOf([A.HueSaturationValue(p=0.5), A.ToGray(p=0.5), A.RGBShift(p=0.5)], p=0.3),
-        A.OneOf([RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2), A.RandomGamma()], p=0.3),
-        A.Normalize(always_apply=True, p=1.0),
-        ToTensorV2(always_apply=True, p=1.0)
-    ], p=1.0)
-
-    aug_pipeline_val = A.Compose([
-        A.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
-        A.CenterCrop(hyperparameter['crop_size'], hyperparameter['crop_size'], always_apply=True, p=1.0),
-        A.Normalize(always_apply=True, p=1.0),
-        ToTensorV2(always_apply=True, p=1.0)
-    ], p=1.0)
+    aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
+    aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
 
     hyperparameter_str = str(hyperparameter).replace(', \'', ',\n \'')[1:-1]
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val)
 
-    net: RetinaNet = prepare_model(model_path, hyperparameter, device)
+    net: RetinaNet2 = prepare_model(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam(net.parameters(), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
@@ -101,16 +74,23 @@ def prepare_model(model_path, hp, device):
                 param.requires_grad = False
             dfs_freeze(child)
 
-    net = RetinaNet2(frame_stump=stump, pooling_strategy=hp['pooling'], num_frames=hp['num_frames'])
+    net = RetinaNet2(frame_stump=stump, pooling_strategy=hp['pooling'])
     return net
 
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val):
     set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
-    train_dataset = SnippetDataset2(join(base_name, 'labels_train_refined.csv'), join(base_name, set_names[0]),
+    # Get labels file regardless for pipeline version
+    csv_files = os.listdir(base_name)
+    csv_files = [c for c in csv_files if c.endswith('.csv') and c.startswith('labels')]
+    labels_train = sorted([c for c in csv_files if 'train' in c], key=lambda s: len(s), reverse=True)[0]
+    labels_val = sorted([c for c in csv_files if 'val' in c], key=lambda s: len(s), reverse=True)[0]
+    print('Found label files: ', labels_train, labels_val)
+
+    train_dataset = SnippetDataset2(join(base_name, labels_train), join(base_name, set_names[0]),
                                     augmentations=aug_pipeline_train, balance_ratio=hp['balance'],
                                     num_frames=hp['num_frames'], bagging_strategy=hp['bag'])
-    val_dataset = SnippetDataset2(join(base_name, 'labels_val_refined.csv'), join(base_name, set_names[1]),
+    val_dataset = SnippetDataset2(join(base_name, labels_val), join(base_name, set_names[1]),
                                   augmentations=aug_pipeline_val, num_frames=hp['num_frames'], bagging_strategy=hp['bag'])
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]

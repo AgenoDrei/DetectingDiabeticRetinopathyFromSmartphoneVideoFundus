@@ -58,7 +58,7 @@ def get_video_desc(video_path, only_eye=False):
     if len(info_parts) == 1 or only_eye:
         return {'eye_id': info_parts[0]}
     elif len(info_parts) == 2:
-        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1])}
+        return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[1])}
     elif len(info_parts) > 3:
         return {'eye_id': info_parts[0], 'snippet_id': int(info_parts[1]), 'frame_id': int(info_parts[3]),
                 'confidence': info_parts[2]}

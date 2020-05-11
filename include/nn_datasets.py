@@ -206,7 +206,7 @@ class SnippetDataset(Dataset):
 
 
 class SnippetDataset2(Dataset):
-    def __init__(self, csv_file, root_dir, num_frames=20, file_type='.png', balance_ratio=1.0, augmentations=None, bagging_strategy='snippet'):
+    def __init__(self, csv_file, root_dir, num_frames, file_type='.png', balance_ratio=1.0, augmentations=None, bagging_strategy='snippet'):
         self.labels_df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.file_type = file_type
@@ -214,43 +214,31 @@ class SnippetDataset2(Dataset):
         self.ratio = balance_ratio
         self.num_frames = num_frames
         self.bag_strategy = bagging_strategy
+        self.occurrences = {}
+        for row in self.labels_df.itertuples():
+            eye_id = nn_utils.get_video_desc(row.image)['eye_id']
+            entry = self.occurrences.get(eye_id)
+            self.occurrences[eye_id] = self.occurrences[eye_id] + 1 if entry else 1
+        self.bags = self._create_bags(bagging_strategy)
 
     def __len__(self):
         return len(self.labels_df)
 
     def __getitem__(self, idx):
         assert not torch.is_tensor(idx)
+        bag = self.bags[idx]
+        prefix = 'pos' if bag['label'] == 1 else 'neg'
+        #else:
+        #    snippet_list = list(set([get_video_desc(f)['snippet_id'] for f in video_all_frames]))
+        #    selected_snippets = np.random.choice(snippet_list, self.num_frames)
+        #    selected_frames = []
+        #    for snippet in selected_snippets:
+        #        selected_frame_idx = np.random.randint(0, 20)
+        #        selected_frames.append(
+        #            [f for f in video_all_frames if int(snippet) == get_video_desc(f)['snippet_id']][selected_frame_idx])
 
-        image_idx = idx
-
-        severity = self.labels_df.iloc[image_idx, 1]
-        prefix = 'pos' if severity == 1 else 'neg'
-
-        snip_name = self.labels_df.iloc[image_idx, 0]
-        snip_desc = get_video_desc(snip_name)
-
-        video_all_frames = [f for f in os.listdir(os.path.join(self.root_dir, prefix)) if
-                            snip_desc['eye_id'] == get_video_desc(f)['eye_id']]
-
-        if self.bag_strategy == 'snippet':
-            snippet_frames = sorted(
-                [f for f in video_all_frames if snip_desc['snippet_id'] == get_video_desc(f)['snippet_id']],
-                key=lambda n: get_video_desc(n)['frame_id'])
-            selected_frames = snippet_frames
-        elif self.bag_strategy == 'random':
-            selection = np.random.randint(0, len(video_all_frames), self.num_frames)  # Generate random indicies
-            selected_frames = [video_all_frames[idx] for idx in selection]
-        else:
-            snippet_list = list(set([get_video_desc(f)['snippet_id'] for f in video_all_frames]))
-            selected_snippets = np.random.choice(snippet_list, self.num_frames)
-            selected_frames = []
-            for snippet in selected_snippets:
-                selected_frame_idx = np.random.randint(0, 20)
-                selected_frames.append(
-                    [f for f in video_all_frames if int(snippet) == get_video_desc(f)['snippet_id']][selected_frame_idx])
-
-        sample = {'frames': {}, 'label': severity, 'name': snip_desc['eye_id'][:5]}
-        for i, name in enumerate(selected_frames):
+        sample = {'frames': {}, 'label': bag['label'], 'name': bag['name'][:5]}
+        for i, name in enumerate(bag['frames']):
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
             sample_name = 'image' + (str(i) if i != 0 else '')
             sample['frames'][sample_name] = img
@@ -265,6 +253,23 @@ class SnippetDataset2(Dataset):
             idx = idx.tolist()
         severity = self.labels_df.iloc[idx, 1]
         return self.ratio if severity == 0 else 1.0
+
+    def _create_bags(self, bagging_strategy):
+        bags = []
+        for eye, value in self.occurrences.items():
+            bag_label = self.labels_df[self.labels_df.image.str.contains(eye)].iloc[0].level
+            prefix = 'pos' if bag_label == 1 else 'neg'
+
+            eye_frames = sorted([f for f in os.listdir(join(self.root_dir, prefix)) if get_video_desc(f)['eye_id'] == eye], key=lambda n: get_video_desc(n)['frame_id'])
+            if bagging_strategy == 'random':
+                random.shuffle(eye_frames)
+            if value <= self.num_frames:
+                bags.append({'frames': eye_frames, 'label': bag_label, 'name': f'{eye}_{0}', 'shortname': eye})
+            else:
+                for i, start_idx in enumerate(range(0, len(eye_frames), self.num_frames)):
+                    bags.append({'frames': eye_frames[start_idx:start_idx + self.num_frames], 'label': bag_label,
+                                 'name': f'{eye}_{i}'})
+        return bags
 
 
 class PaxosBags(Dataset):
