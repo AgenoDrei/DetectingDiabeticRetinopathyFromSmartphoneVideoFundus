@@ -137,7 +137,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.stump.state_dict(), f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth')
+            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth')
             best_model_path = f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth'
 
         scheduler.step(val_loss)
@@ -174,6 +174,7 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
         write_scores(writer, 'eval', eye_scores, cur_epoch)
     else:
         writer.add_hparams(hparam_dict=hp, metric_dict=val_scores)
+    scores.data.to_csv(f'{time.strftime("%Y%m%d")}_best_mil_model_{val_scores["f1"]:0.2}.csv', index=False)
     
     return running_loss / len(loader.dataset), val_scores['f1']
 
