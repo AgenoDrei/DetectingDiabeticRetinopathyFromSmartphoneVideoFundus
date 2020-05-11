@@ -29,15 +29,15 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
         'balance': 0.4,
-        'image_size': 450,
-        'crop_size': 399,
+        'image_size': 350,
+        'crop_size': 299,
         'pretraining': True,
         'preprocessing': False,
         'stump': stump_type,
-        'attention_neurons': 1024,
-        'bag_size': 100,
+        'attention_neurons': 512,
+        'bag_size': 30,
         'attention': 'normal',          # normal / gated
-        'pooling': 'max'                # avg / max / none
+        'pooling': 'avg'                # avg / max / none
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
@@ -48,12 +48,15 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
     loaders = prepare_dataset(data_path, hyperparameter, aug_pipeline_train, aug_pipeline_val, num_workers)
     net = prepare_network(model_path, hyperparameter, device)
 
-    #optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
-    #                           {'params': net.feature_extractor_part2.parameters(), 'lr': 1e-5},
-    #                           {'params': net.attention.parameters()},
-    #                           {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
-    #                          weight_decay=hyperparameter['weight_decay'])
-    optimizer_ft = optim.Adam(net.parameters(), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
+                               {'params': net.feature_extractor_part2.parameters()},#, 'lr': 1e-5},
+                               {'params': net.attention.parameters()},
+                               {'params': net.att_v.parameters()},
+                               {'params': net.att_u.parameters()},
+                               {'params': net.att_weights.parameters()},
+                               {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
+                              weight_decay=hyperparameter['weight_decay'])
+    # optimizer_ft = optim.Adam(net.parameters(), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=15, verbose=True)
 
@@ -146,7 +149,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-    print(f'Best f1 score: {best_f1_val}, model saved to: {best_model_path}')
+    print(f'Best f1 score: {best_f1_val}, model saved...')
 
     return best_model
 
@@ -174,8 +177,10 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
         write_scores(writer, 'val', val_scores, cur_epoch)
         eye_scores = scores.calc_scores_eye(as_dict=True)
         write_scores(writer, 'eval', eye_scores, cur_epoch)
+        scores.data.to_csv(f'training_mil_avg_{val_scores["f1"]}_{eye_scores["f1"]}.csv', index=False)
     else:
-        writer.add_hparams(hparam_dict=hp, metric_dict=val_scores)
+        eye_scores = scores.calc_scores_eye(as_dict=True)
+        writer.add_hparams(hparam_dict=hp, metric_dict=eye_scores)
     
     return running_loss / len(loader.dataset), eye_scores['f1']
 
