@@ -14,6 +14,8 @@ from torchvision import models
 from tqdm import tqdm
 from typing import Tuple
 from pretrainedmodels.models import inceptionv4
+import copy
+
 
 def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num_workers):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
@@ -21,7 +23,7 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(data_path)),
         'learning_rate': 1e-4,
-        'weight_decay': 3e-4,
+        'weight_decay': 1e-4,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
@@ -32,8 +34,8 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'pretraining': True,
         'preprocessing': False,
         'stump': stump_type,
-        'attention_neurons': 512,
-        'bag_size': 35,
+        'attention_neurons': 1024,
+        'bag_size': 100,
         'attention': 'normal',          # normal / gated
         'pooling': 'max'                # avg / max / none
     }
@@ -46,20 +48,21 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
     loaders = prepare_dataset(data_path, hyperparameter, aug_pipeline_train, aug_pipeline_val, num_workers)
     net = prepare_network(model_path, hyperparameter, device)
 
-    optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
-                               {'params': net.feature_extractor_part2.parameters(), 'lr': 1e-5},
-                               {'params': net.attention.parameters()},
-                               {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
-                              weight_decay=hyperparameter['weight_decay'])
+    #optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
+    #                           {'params': net.feature_extractor_part2.parameters(), 'lr': 1e-5},
+    #                           {'params': net.attention.parameters()},
+    #                           {'params': net.classifier.parameters()}], lr=hyperparameter['learning_rate'],
+    #                          weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam(net.parameters(), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=15, verbose=True)
 
     desc = f'_paxos_mil_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
 
-    best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
+    best_model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
                                   hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    validate(prepare_network(best_model_path, hyperparameter, device, whole_net=True), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    validate(best_model, criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
@@ -105,7 +108,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     print('Training model...')
     since = time.time()
     best_f1_val = -1
-    best_model_path = None
+    best_model = None
 
     for epoch in range(num_epochs):
         print(f'{time.strftime("%H:%M:%S")}> Epoch {epoch}/{num_epochs}')
@@ -137,8 +140,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth')
-            best_model_path = f'{time.strftime("%Y%m%d")}_best_mil_model_{val_f1:0.2}.pth'
+            best_model = copy.deepcopy(model)
 
         scheduler.step(val_loss)
 
@@ -146,7 +148,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
     print(f'Best f1 score: {best_f1_val}, model saved to: {best_model_path}')
 
-    return best_model_path
+    return best_model
 
 
 def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=False) -> Tuple[float, float]:
@@ -176,7 +178,7 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
         writer.add_hparams(hparam_dict=hp, metric_dict=val_scores)
     scores.data.to_csv(f'{time.strftime("%Y%m%d")}_best_mil_model_{val_scores["f1"]:0.2}.csv', index=False)
     
-    return running_loss / len(loader.dataset), val_scores['f1']
+    return running_loss / len(loader.dataset), eye_scores['f1']
 
 
 if __name__ == '__main__':
