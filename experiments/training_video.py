@@ -16,7 +16,7 @@ from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from typing import Tuple
-
+from torchvision import models
 
 def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
@@ -33,11 +33,12 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.4,
-        'num_frames': 30,
+        'num_frames': 50,
         'pooling': 'avg', # max / avg
         'bag': 'snippet', # snippet / random / snippet sampling
         'pretraining': True,
-        'preprocessing': False
+        'preprocessing': False,
+        'stump': 'inception' # alexnet / inception
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
@@ -49,6 +50,12 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
     net: RetinaNet2 = prepare_model(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam(net.parameters(), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam([{'params': net.features.parameters(), 'lr': 1e-5},
+                               {'params': net.pooling.parameters()},
+                               {'params': net.features2.parameters()},
+                               {'params': net.after_pooling.parameters()}], lr=hyperparameter['learning_rate'],
+                              weight_decay=hyperparameter['weight_decay'])
+
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=15, verbose=True)
 
@@ -59,22 +66,27 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
 
 
 def prepare_model(model_path, hp, device):
-    stump: ptm.inceptionv4 = ptm.inceptionv4()
-
-    num_ftrs = stump.last_linear.in_features
-    stump.last_linear = nn.Linear(num_ftrs, 2)
+    stump = None
+    
+    if hp['stump'] == 'inception':
+        stump = ptm.inceptionv4()
+        num_ftrs = stump.last_linear.in_features
+        stump.last_linear = nn.Linear(num_ftrs, 2)
+        for i, child in enumerate(stump.features.children()):
+            if i < len(stump.features) * hp['freeze']:
+                for param in child.parameters():
+                    param.requires_grad = False
+                dfs_freeze(child)
+    elif hp['stump'] == 'alexnet':
+        stump = models.alexnet(pretrained=True)
+        num_ftrs = stump.classifier[-1].in_features
+        stump.classifier[-1] = nn.Linear(num_ftrs, 2)
+    
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.train()
-
-    for i, child in enumerate(stump.features.children()):
-        if i < len(stump.features) * hp['freeze']:
-            for param in child.parameters():
-                param.requires_grad = False
-            dfs_freeze(child)
-
-    net = RetinaNet2(frame_stump=stump, pooling_strategy=hp['pooling'])
+    net = RetinaNet2(frame_stump=stump, pooling_strategy=hp['pooling'], stump_type=hp['stump'])
     return net
 
 

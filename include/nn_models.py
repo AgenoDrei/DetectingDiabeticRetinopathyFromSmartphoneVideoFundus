@@ -35,21 +35,32 @@ class RetinaNet(nn.Module):
 
 
 class RetinaNet2(nn.Module):
-    def __init__(self, frame_stump, num_frames=20, pooling_strategy='max'):
+    def __init__(self, frame_stump, num_frames=20, pooling_strategy='max', stump_type='inception'):
         super(RetinaNet2, self).__init__()
         self.stump = frame_stump
+        self.features = self.stump.features
         self.pooling_strategy = pooling_strategy
-        self.pool_params = (self.stump.last_linear.in_features, 1536) if pooling_strategy == 'max' or pooling_strategy == 'avg' else (
-            1536*11*11, 1536)  # fix for higher resolutions / different networks
-        self.out_stump = self.pool_params[0]
+        # self.pool_params = (self.stump.last_linear.in_features, 1536) if pooling_strategy == 'max' or pooling_strategy == 'avg' else (
+        #    1536*11*11, 1536)  # fix for higher resolutions / different networks
+        # self.out_stump = self.pool_params[0]
 
-        self.pooling = self.stump.avg_pool if pooling_strategy == 'avg' else nn.MaxPool2d(self.stump.avg_pool.kernel_size, stride=self.stump.avg_pool.stride)
-        self.after_pooling = nn.Linear(self.pool_params[1], 2)
+        if stump_type == 'inception':
+            self.features2 = nn.Identity()
+            self.pooling = self.stump.avg_pool if pooling_strategy == 'avg' else nn.MaxPool2d(self.stump.avg_pool.kernel_size, stride=self.stump.avg_pool.stride)
+            self.after_pooling = nn.Linear(1536*1*1, 2)
+        elif stump_type == 'alexnet':
+            self.pooling = self.stump.avgpool
+            self.features2 = self.stump.classifier[:-1] # N x 4096
+            self.after_pooling = nn.Linear(4096, 2)
+        
 
     def forward(self, x):
         x = x.squeeze(0)
-        x = self.stump.features(x)
-        h = self.pooling(x) if self.pooling_strategy != None else x
+        x = self.features(x)
+        h = self.pooling(x) #if self.pooling_strategy != None else x
+        if self.features2:
+            h = torch.flatten(h, 1)
+            h = self.features2(h)
         h = h.view(h.size(0), -1)  # Flatten results for fc / pooling
         h = torch.max(h, 0, keepdim=True)[0]  # Temproal pooling over 1 dim
         out = self.after_pooling(h)

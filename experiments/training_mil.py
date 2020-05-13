@@ -169,7 +169,7 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
             error, preds = model.calculate_classification_error(inputs, labels) 
             running_loss += loss.item()
 
-        scores.add(preds, labels, tags=eye_ids)
+        scores.add(preds, labels, tags=eye_ids, attention=attention_weights)
 
     val_scores = scores.calc_scores(as_dict=True)
     val_scores['loss'] = running_loss / len(loader.dataset)

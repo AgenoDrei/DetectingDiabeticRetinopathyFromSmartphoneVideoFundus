@@ -222,10 +222,12 @@ class SnippetDataset2(Dataset):
         self.bags = self._create_bags(bagging_strategy)
 
     def __len__(self):
-        return len(self.labels_df)
+        return len(self.bags)
 
     def __getitem__(self, idx):
         assert not torch.is_tensor(idx)
+        if idx == 0:
+            print(self.bags[idx])
         bag = self.bags[idx]
         prefix = 'pos' if bag['label'] == 1 else 'neg'
         #else:
@@ -249,10 +251,9 @@ class SnippetDataset2(Dataset):
         return sample
 
     def get_weight(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        severity = self.labels_df.iloc[idx, 1]
-        return self.ratio if severity == 0 else 1.0
+        assert not torch.is_tensor(idx)
+        bag = self.bags[idx]
+        return self.ratio if bag['label'] == 0 else 1.0
 
     def _create_bags(self, bagging_strategy):
         bags = []
@@ -297,11 +298,12 @@ class PaxosBags(Dataset):
         bag = self.bags[idx]
         prefix = 'pos' if bag['label'] == 1 else 'neg'
 
-        sample = {'frames': [], 'label': bag['label'], 'name': bag['name'][:5]}
+        sample = {'frames': [], 'frame_names': [], 'label': bag['label'], 'name': bag['name'][:5]}
         for name in bag['frames']:
             img = cv2.imread(os.path.join(self.root_dir, prefix, name))
             img = self.augs(image=img)['image'] if self.augs else img
             sample['frames'].append(img)
+            sample['frame_names'].append(os.path.join(prefix, name))
 
         sample['frames'] = torch.stack(sample['frames']) if self.augs else np.stack(sample['frames'])
         return sample
