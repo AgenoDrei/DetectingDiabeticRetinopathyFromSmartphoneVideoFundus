@@ -34,10 +34,10 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'pretraining': True,
         'preprocessing': False,
         'stump': stump_type,
-        'attention_neurons': 512,
-        'bag_size': 30,
+        'attention_neurons': 1024,
+        'bag_size': 100,
         'attention': 'normal',          # normal / gated
-        'pooling': 'avg'                # avg / max / none
+        'pooling': 'max'                # avg / max / none
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])

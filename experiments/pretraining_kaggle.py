@@ -36,7 +36,7 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'network': 'Efficient',   # AlexNet / VGG / Inception / Efficient 
+        'network': 'Inception',   # AlexNet / VGG / Inception / Efficient 
         'image_size': 450,
         'crop_size': 399,
         'freeze': 0.0,
@@ -132,7 +132,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         print('-' * 10)
 
         running_loss = 0.0
-        cm = torch.zeros(2, 2)
+        metrics = nn_utils.Scores()
 
         # Iterate over data.
         for i, batch in tqdm(enumerate(loaders[0]), total=len(loaders[0]), desc=f'Epoch {epoch}'):
@@ -149,17 +149,17 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
             optimizer.step()
 
             running_loss += loss.item() * inputs.size(0)
-            for true, pred in zip(labels, pred):
-                cm[int(true), int(pred)] += 1
+            metrics.add(pred, labels)
 
-        train_scores = nn_utils.calc_scores_from_confusion_matrix(cm)
+
+        train_scores = metrics.calc_scores(as_dict=True)
         train_scores['loss'] = running_loss / len(loaders[0].dataset)
         nn_utils.write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, epoch)
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'best_model_{description}_{val_f1:0.2}.pth')
+            torch.save(model.state_dict(), f'KAGGLE_best_model_{model.__class__.__name__}_{val_f1:0.2}.pth')
 
         scheduler.step(val_loss)
 
