@@ -34,8 +34,8 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'pretraining': True,
         'preprocessing': False,
         'stump': stump_type,
-        'attention_neurons': 1024,
-        'bag_size': 100,
+        'attention_neurons': 738,
+        'bag_size': 75,
         'attention': 'normal',          # normal / gated
         'pooling': 'max'                # avg / max / none
     }
@@ -49,7 +49,7 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
     net = prepare_network(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam([{'params': net.feature_extractor_part1.parameters(), 'lr': 1e-5},
-                               {'params': net.feature_extractor_part2.parameters()},#, 'lr': 1e-5},
+                               {'params': net.feature_extractor_part2.parameters()}, #, 'lr': 1e-5},
                                {'params': net.attention.parameters()},
                                {'params': net.att_v.parameters()},
                                {'params': net.att_u.parameters()},
@@ -169,8 +169,8 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
             error, preds = model.calculate_classification_error(inputs, labels) 
             running_loss += loss.item()
 
-        scores.add(preds, labels, tags=eye_ids, attention=attention_weights)
-
+        scores.add(preds, labels, tags=eye_ids, attention=attention_weights, files=batch['frame_names'])
+    
     val_scores = scores.calc_scores(as_dict=True)
     val_scores['loss'] = running_loss / len(loader.dataset)
     if not calc_roc:

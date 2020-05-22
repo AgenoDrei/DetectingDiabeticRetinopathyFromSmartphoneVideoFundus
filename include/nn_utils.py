@@ -218,15 +218,18 @@ Score = namedtuple('Score', ['f1', 'precision', 'recall', 'accuracy', 'kappa', '
 
 class Scores:
     def __init__(self):
-        self.columns = ['eye_id', 'label', 'prediction', 'probability', 'attention']
+        self.columns = ['eye_id', 'label', 'prediction', 'probability', 'attention', 'files']
         self.data = pd.DataFrame(columns=self.columns)
 
-    def add(self, preds: torch.Tensor, labels: torch.Tensor, tags: list = None, probs: torch.Tensor = None, attention: torch.Tensor = None):
+    def add(self, preds: torch.Tensor, labels: torch.Tensor, tags: list = None, probs: torch.Tensor = None, attention: torch.Tensor = None, files: list = None):
         new_data = tags if tags is not None else ['train' for i in range(len(labels.tolist()))], \
                    labels.tolist(), \
                    preds.tolist(), \
                    probs.tolist() if probs is not None else [0 for i in range(len(labels.tolist()))], \
-                   attention.tolist() if attention is not None else [0 for i in range(len(labels.tolist()))]
+                   attention.tolist() if attention is not None else [0 for i in range(len(labels.tolist()))], \
+                   [files] if files is not None else ["" for i in range(len(labels.tolist()))]
+        
+        # print(len(new_data[5]), len(new_data[4]), len(labels))
 
         new_data_dict = {col: new_data[i] for i, col in enumerate(self.columns)}
         self.data = self.data.append(pd.DataFrame(new_data_dict), ignore_index=True)

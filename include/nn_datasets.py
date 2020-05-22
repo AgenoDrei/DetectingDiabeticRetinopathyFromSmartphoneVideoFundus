@@ -325,7 +325,7 @@ class PaxosBags(Dataset):
             else:
                 for i, start_idx in enumerate(range(0, len(eye_frames), self.max_bag_size)):
                     bags.append({'frames': eye_frames[start_idx:start_idx+self.max_bag_size], 'label': bag_label, 'name': f'{eye}_{i}'})
-        print('Created bags: ', len(bags), self.occurrences)
+        # print('Created bags: ', len(bags), self.occurrences)
         return bags
 
 

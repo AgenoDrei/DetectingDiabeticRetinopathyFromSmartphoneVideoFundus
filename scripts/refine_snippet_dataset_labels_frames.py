@@ -16,11 +16,11 @@ def run(input_path, labels_path, dataset, mode):
     for i, row in tqdm(df.iterrows(), total=len(df)):
         video_desc = get_video_desc(row['image'])
         level = row['level']
-        prefix = 'pos' if row['level'] == 1 else 'neg'
+        prefix = 'pos' if row['level'] > 0 else 'neg'
 
         matching_files = [f for f in files[prefix] if get_video_desc(f)['eye_id'] == video_desc['eye_id'] and (mode == 'frames' or get_video_desc(f)['snippet_id'] == video_desc['snippet_id'])]
         for file in matching_files:
-            df_refined = df_refined.append({'image': file, 'level': level}, ignore_index=True)
+            df_refined = df_refined.append({'image': file, 'level': 1 if level > 0 else 0}, ignore_index=True)
 
     df_refined.to_csv(join(input_path, f'labels_{dataset}_frames.csv'), index=False)
 

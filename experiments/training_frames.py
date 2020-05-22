@@ -45,7 +45,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'use_clahe': False,
         'narrow_model': False,
         'remove_glare': False,
-        'voting_percentage': 0.1
+        'voting_percentage': 1.0
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -87,7 +87,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     writer = SummaryWriter(comment=desc)
     best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
 
-    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[2], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
 
 
 def prepare_model(model_path, hp, device):
@@ -124,8 +124,11 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
         train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]),
                                       augmentations=aug_train,
                                       balance_ratio=hp['balance'], file_type='', use_prefix=True,
-                                      boost_frames=hp['boosting'], occur_balance=True)
+                                      boost_frames=hp['boosting'], occur_balance=False)
         val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]),
+                                    augmentations=aug_val, file_type='',
+                                    use_prefix=True)
+        test_dataset = RetinaDataset(join(base_name, 'labels_test_frames.csv'), join(base_name, 'test'),
                                     augmentations=aug_val, file_type='',
                                     use_prefix=True)
     else:
@@ -143,8 +146,10 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
                                                sampler=sampler, num_workers=num_workers)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=hp['batch_size'], shuffle=False,
                                              num_workers=num_workers)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=hp['batch_size'], shuffle=False,
+                                            num_workers=num_workers)
     print(f'Dataset info:\n Train size: {len(train_dataset)},\n Validation size: {len(val_dataset)}')
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def train_model(model, criterion, optimizer, scheduler, loaders, device, writer, hp, num_epochs=50, description='Vanilla'):
@@ -220,6 +225,10 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
 
     eye_scores = scores.calc_scores_eye(as_dict=True, top_percent=hp['voting_percentage'])
     if not calc_roc: write_scores(writer, 'eval', eye_scores, cur_epoch)
+    
+    if calc_roc:
+        write_scores(writer, 'etest', val_scores, cur_epoch)
+        write_scores(writer, 'test', eye_scores, cur_epoch)
 
     return running_loss / len(loader.dataset), eye_scores['f1']
 

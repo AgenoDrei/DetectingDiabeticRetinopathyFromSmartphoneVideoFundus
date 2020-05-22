@@ -1,5 +1,7 @@
 import sys
 import nn_utils
+import nn_models
+import nn_datasets
 import torch
 import argparse
 import albumentations as alb
@@ -39,7 +41,7 @@ def prepare_model(model_path, device):
 
 
 def prepare_dataset(data_path, labels_path, aug_pipeline, bs):
-    dataset = nn_utils.RetinaDataset(labels_path, data_path, augmentations=aug_pipeline, file_type='', use_prefix=True)
+    dataset = nn_datasets.RetinaDataset(labels_path, data_path, augmentations=aug_pipeline, file_type='', use_prefix=True)
     loader = data.DataLoader(dataset, batch_size=bs, shuffle=False, num_workers=16)
     df = dataset.labels_df
     print(f'Dataset size: {len(dataset)}')
