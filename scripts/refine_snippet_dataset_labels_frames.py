@@ -5,9 +5,11 @@ from nn_utils import get_video_desc
 import pandas as pd
 from tqdm import tqdm
 
+COL_CLASS = 'level'
 
 def run(input_path, labels_path, dataset, mode):
     df = pd.read_csv(labels_path)
+    df[COL_CLASS] = df[COL_CLASS].astype(int)
     df_refined = pd.DataFrame(columns=df.columns)
 
     files = {'pos': os.listdir(join(input_path, dataset, 'pos')),
@@ -28,8 +30,8 @@ def run(input_path, labels_path, dataset, mode):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     a = argparse.ArgumentParser()
-    a.add_argument("--input", help="absolute path to input folder")
-    a.add_argument("--labels", help="absolute path to input folder")
+    a.add_argument("--input", help="absolute path to base dataset path")
+    a.add_argument("--labels", help="absolute path to CSV label file to be refined")
     a.add_argument("--set", help="which set to refine (train/val/test)", default="train")
     a.add_argument("--mode", help="applied to frames or snippets", default="snippets")
 
