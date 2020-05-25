@@ -45,7 +45,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'use_clahe': False,
         'narrow_model': False,
         'remove_glare': False,
-        'voting_percentage': 1.0
+        'voting_percentage': 1.0,
+        'validation': 'tvt' # tvt = train / val / test, tt = train(train + val) / test
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -75,7 +76,6 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val,
                               num_workers)
-
     net = prepare_model(model_path, hyperparameter, device)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
@@ -86,8 +86,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
     desc = f'_paxos_frames_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
     best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
+    print('Best identified model: ', best_model_path)
 
-    validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[2], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    # validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[2], device, writer, hyperparameter, hyperparameter['num_epochs'], is_test=True)
 
 
 def prepare_model(model_path, hp, device):
@@ -119,24 +120,29 @@ def prepare_model(model_path, hp, device):
 
 
 def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
-    set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
+    set_names = {'train': 'train', 'val': 'val', 'test': 'test'}
+    if hp['preprocessing']:
+        set_names = {'train': 'train_pp', 'val': 'val_pp'}
+    elif hp['validation'] == 'tt':
+        set_names = {'train': 'train+val', 'val': 'test'}
+
     if not hp['multi_channel']:
-        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names[0]),
+        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names['train']),
                                       augmentations=aug_train,
                                       balance_ratio=hp['balance'], file_type='', use_prefix=True,
                                       boost_frames=hp['boosting'], occur_balance=False)
-        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]),
+        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names['val']),
                                     augmentations=aug_val, file_type='',
                                     use_prefix=True)
-        test_dataset = RetinaDataset(join(base_name, 'labels_test_frames.csv'), join(base_name, 'test'),
+        test_dataset = RetinaDataset(join(base_name, 'labels_test_frames.csv'), join(base_name, set_names['test']),
                                     augmentations=aug_val, file_type='',
                                     use_prefix=True)
     else:
         train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'),
-                                                  join(base_name, set_names[0]), augmentations=aug_train,
+                                                  join(base_name, set_names.train), augmentations=aug_train,
                                                   balance_ratio=hp['balance'], file_type='', use_prefix=True,
                                                   processed_suffix='_pp')
-        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names[1]),
+        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names.val),
                                                 augmentations=aug_val,
                                                 file_type='', use_prefix=True, processed_suffix='_pp')
 
@@ -185,21 +191,25 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
         train_scores['loss'] = running_loss / len(loaders[0].dataset)
         write_scores(writer, 'train', train_scores, epoch)
         val_loss, val_f1 = validate(model, criterion, loaders[1], device, writer, hp, epoch)
+        if hp['validation'] == 'tvt': validate(model, criterion, loaders[2], device, writer, hp, epoch, is_test=True)
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth')
-            best_model_path = f'{time.strftime("%Y%m%d")}_best_paxos_frames_model_{val_f1:0.2}.pth'
+            best_model_path = f'best_frames_model_f1_{val_f1:0.2}_epoch_{epoch}.pth'
+            torch.save(model.state_dict(), best_model_path)
 
         scheduler.step(val_loss)
 
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
+    if hp['validation'] == 'tt': # For test set evaluation, the last model should be used (specified by number of epochs) therefore overwrite the best_model_path
+        best_model_path = f'frames_model_evalf1_{val_f1:0.2}_epoch_{epoch}.pth'
+        torch.save(model.state_dict(), best_model_path)
     return best_model_path
 
 
-def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=False) -> Tuple[float, float]:
+def validate(model, criterion, loader, device, writer, hp, cur_epoch, is_test=False) -> Tuple[float, float]:
     model.eval()
     running_loss = 0.0
     sm = torch.nn.Softmax(dim=1)
@@ -221,14 +231,14 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
 
     val_scores = scores.calc_scores(as_dict=True)
     val_scores['loss'] = running_loss / len(loader.dataset)
-    if not calc_roc: write_scores(writer, 'val', val_scores, cur_epoch)
 
     eye_scores = scores.calc_scores_eye(as_dict=True, top_percent=hp['voting_percentage'])
-    if not calc_roc: write_scores(writer, 'eval', eye_scores, cur_epoch)
-    
-    if calc_roc:
-        write_scores(writer, 'etest', val_scores, cur_epoch)
-        write_scores(writer, 'test', eye_scores, cur_epoch)
+    if not is_test:
+        write_scores(writer, 'val', val_scores, cur_epoch)
+        write_scores(writer, 'eval', eye_scores, cur_epoch)
+    else:
+        write_scores(writer, 'test', val_scores, cur_epoch)
+        write_scores(writer, 'etest', eye_scores, cur_epoch)
 
     return running_loss / len(loader.dataset), eye_scores['f1']
 
