@@ -58,6 +58,7 @@ if __name__ == '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")
+    a.add_argument("--sigma", help="sigma for gaussian filter", default=10, type=int)
     a.add_argument("--improve_light", help="apply ben graham light improvements", action="store_true")
     a.add_argument("--recursive", "-r", help="apply recursivly to all directories", action="store_true")
     args = a.parse_args()
@@ -69,7 +70,7 @@ if __name__ == '__main__':
     os.mkdir(args.output)
 
     if not args.recursive:
-        j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, light=args.improve_light) for f in os.listdir(args.input))
+        j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, light=args.improve_light, sigma=args.sigma) for f in os.listdir(args.input))
     else:
         files = os.walk(args.input)
         working_paths = []
