@@ -46,7 +46,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'narrow_model': False,
         'remove_glare': False,
         'voting_percentage': 1.0,
-        'validation': 'tvt' # tvt = train / val / test, tt = train(train + val) / test
+        'validation': 'tv' # tvt = train / val / test, tt = train(train + val) / test
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -85,9 +85,10 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
     desc = f'_paxos_frames_{str("_".join([k[0] + str(hp) for k, hp in hyperparameter.items()]))}'
     writer = SummaryWriter(comment=desc)
-    best_model_path = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    print('Best identified model: ', best_model_path)
-
+    model_path, f1 = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
+    print('Best identified model: ', model_path)
+    print('Performance F1: ', f1)
+    return f1
     # validate(prepare_model(best_model_path, hyperparameter, device), criterion, loaders[2], device, writer, hyperparameter, hyperparameter['num_epochs'], is_test=True)
 
 
@@ -124,17 +125,19 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
     if hp['preprocessing']:
         set_names = {'train': 'train_pp', 'val': 'val_pp'}
     elif hp['validation'] == 'tt':
-        set_names = {'train': 'train+val', 'val': 'test'}
+        set_names = {'train': 'train+val', 'val': 'test', 'test': 'test'}
+    elif hp['validation'] == 'tv':
+        set_names = {'train': 'train', 'val': 'val', 'test': 'val'}
 
     if not hp['multi_channel']:
-        train_dataset = RetinaDataset(join(base_name, 'labels_train_frames.csv'), join(base_name, set_names['train']),
+        train_dataset = RetinaDataset(join(base_name, f'labels_{set_names["train"]}_frames.csv'), join(base_name, set_names['train']),
                                       augmentations=aug_train,
                                       balance_ratio=hp['balance'], file_type='', use_prefix=True,
                                       boost_frames=hp['boosting'], occur_balance=False)
-        val_dataset = RetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names['val']),
+        val_dataset = RetinaDataset(join(base_name, f'labels_{set_names["val"]}_frames.csv'), join(base_name, set_names['val']),
                                     augmentations=aug_val, file_type='',
                                     use_prefix=True)
-        test_dataset = RetinaDataset(join(base_name, 'labels_test_frames.csv'), join(base_name, set_names['test']),
+        test_dataset = RetinaDataset(join(base_name, f'labels_{set_names["test"]}_frames.csv'), join(base_name, set_names['test']),
                                     augmentations=aug_val, file_type='',
                                     use_prefix=True)
     else:
@@ -203,10 +206,10 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
-    if hp['validation'] == 'tt': # For test set evaluation, the last model should be used (specified by number of epochs) therefore overwrite the best_model_path
+    if hp['validation'] == 'tt' or hp['validation'] == 'tv': # For test set evaluation, the last model should be used (specified by number of epochs) therefore overwrite the best_model_path
         best_model_path = f'frames_model_evalf1_{val_f1:0.2}_epoch_{epoch}.pth'
         torch.save(model.state_dict(), best_model_path)
-    return best_model_path
+    return best_model_path, val_f1
 
 
 def validate(model, criterion, loader, device, writer, hp, cur_epoch, is_test=False) -> Tuple[float, float]:
