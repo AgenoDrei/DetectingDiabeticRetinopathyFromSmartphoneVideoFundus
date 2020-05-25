@@ -57,13 +57,14 @@ if __name__ == '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("--input", help="absolute path to input folder")
     a.add_argument("--output", help="absolute path to output folder")
+    a.add_argument("--sigma", help="sigma for gaussian filter", default=10, type=int)
     args = a.parse_args()
 
     assert os.path.exists(args.input)
     if os.path.exists(args.output):
         os.rmdir(args.output)
     os.mkdir(args.output)
-    j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output) for f in os.listdir(args.input))
+    j.Parallel(n_jobs=-1, verbose=1)(j.delayed(preprocess)(f, args.input, args.output, args.sigma) for f in os.listdir(args.input))
 
 
 
