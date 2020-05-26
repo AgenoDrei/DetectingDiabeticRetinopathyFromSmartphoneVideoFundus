@@ -21,6 +21,7 @@ from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from torchvision import models
 
 
 def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
@@ -46,7 +47,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'narrow_model': False,
         'remove_glare': False,
         'voting_percentage': 1.0,
-        'validation': 'tv' # tvt = train / val / test, tt = train(train + val) / test
+        'validation': 'tv', # tvt = train / val / test, tt = train(train + val) / test
+        'network': 'alexnet' # alexnet / inception
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -78,8 +80,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
                               num_workers)
     net = prepare_model(model_path, hyperparameter, device)
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
-                              weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam([{'params': net.features.parameters(), 'lr': 1e-5},
+                               {'params': net.classifier.parameters()}],
+            lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
 
@@ -101,21 +104,24 @@ def prepare_model(model_path, hp, device):
     elif hp['narrow_model']:
         stump = NarrowInceptionV1(num_classes=2)
         hp['pretraining'] = False
-    else:
+    elif hp['network'] == 'inception':
         stump = ptm.inceptionv4()
         num_ftrs = stump.last_linear.in_features
         stump.last_linear = nn.Linear(num_ftrs, 2)
+    elif hp['network'] == 'alexnet':
+        stump = models.alexnet(pretrained=True)
+        stump.classifier[-1] = nn.Linear(stump.classifier[-1].in_features, 2)
 
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.train()
 
-    for i, child in enumerate(stump.features.children()):
-        if i < len(stump.features) * hp['freeze']:
-            for param in child.parameters():
-                param.requires_grad = False
-            dfs_freeze(child)
+    #for i, child in enumerate(stump.features.children()):
+    #    if i < len(stump.features) * hp['freeze']:
+    #        for param in child.parameters():
+    #            param.requires_grad = False
+    #        dfs_freeze(child)
     stump.to(device)
     return stump
 
