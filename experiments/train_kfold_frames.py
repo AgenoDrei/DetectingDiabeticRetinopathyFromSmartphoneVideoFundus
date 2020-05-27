@@ -25,9 +25,9 @@ if __name__ == '__main__':
     for i in range(args.folds):
         f1 = 0.0
         if args.method == 'frames':
-            f1 = run_frames(join(args.data, f'fold{i}'), args.model, args.gpu, args.bs, args.epochs, 28)
-        elif args.emthod == 'mil':
-            f1 = run_mil(join(args.data, f'fold{i}'), args.model, 'alexnet' if 'alexnet' in args.model.lower() else 'inception', args.gpu, args.bs, args.epochs, 28)
+            f1 = run_frames(join(args.data, f'fold{i}'), args.model, args.gpu, args.bs, args.epochs, args.workers)
+        elif args.method == 'mil':
+            f1 = run_mil(join(args.data, f'fold{i}'), args.model, 'alexnet' if 'alexnet' in args.model.lower() else 'inception', args.gpu, args.bs, args.epochs, args.workers)
         f1_list.append(f1)
         avg_f1 += f1 / args.folds
     
