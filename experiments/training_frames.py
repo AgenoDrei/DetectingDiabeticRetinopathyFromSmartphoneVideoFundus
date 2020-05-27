@@ -36,7 +36,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
-        'balance': 0.45,
+        'balance': 0.3,
         'image_size': 450,
         'crop_size': 399,
         'pretraining': True,
@@ -47,7 +47,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'narrow_model': False,
         'remove_glare': False,
         'voting_percentage': 1.0,
-        'validation': 'tv', # tvt = train / val / test, tt = train(train + val) / test
+        'validation': 'tv', # tvt = train / val / test, tt = train(train + val) / test, tv = train / val
         'network': 'alexnet' # alexnet / inception
     }
     aug_pipeline_train = A.Compose([

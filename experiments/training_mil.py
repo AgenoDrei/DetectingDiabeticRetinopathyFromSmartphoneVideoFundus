@@ -28,7 +28,7 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
-        'balance': 0.4,
+        'balance': 0.3,
         'image_size': 350,
         'crop_size': 299,
         'pretraining': True,
