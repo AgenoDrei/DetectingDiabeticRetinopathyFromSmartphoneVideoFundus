@@ -26,6 +26,15 @@ from tqdm import tqdm
 
 
 def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
+    """
+    Main method to train a network for the DR challenge and saving the model as pretrained stump. Can evaluate different types of network.
+    :param base_path: Absolute path to the dataset. The folder should have folders for training (train), evaluation (val) and corresponding label files
+    :param gpu_name: ID of the gpu (e.g. cuda0)
+    :param batch_size: Batch size
+    :param num_epochs: Maximum number of training epochs
+    :param num_workers: Number of threads used for data loading
+    :return:
+    """
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 

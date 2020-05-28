@@ -17,6 +17,7 @@ def run(input, output, pipeline, fps, majority, mode='snippet'):
     :param pipeline: Absolute path to pretrained SVM pipeline with scaling / preprocessing
     :param fps: Extracted frames per video
     :param majority: Percentage of usable frames, everything above this threshold will be saved to a new snippet
+    :param mode: Determines whether video snippets, snippet frames or frames are extracted (snippet, snippet_frames, frames)
     :return:
     """
     name_pattern = re.compile(r"([A-Z])(\d){3}[RL](\d)?")

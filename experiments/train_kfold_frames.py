@@ -1,12 +1,14 @@
 from training_frames import run as run_frames
 from training_mil import run as run_mil
-
-
 import argparse
 import sys
 from os.path import join
 import math
 
+
+"""
+Helper script to run a cross validation on different learning approaches (MIL, frames)
+"""
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Training frames k-fold')
     parser.add_argument('--data', help='Path for training data', type=str)

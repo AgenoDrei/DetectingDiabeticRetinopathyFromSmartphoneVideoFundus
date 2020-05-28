@@ -4,6 +4,12 @@ from os.path import join
 
 
 def run(input_path):
+    """
+    Small script to remove splinter from a folder. These get created when a exaimer split an eye examination into two files. E.g. C001L + C001L2.
+    All files correspondig to the second video (the splinter) will get ids that are higher than the id of the last frame of the first file
+    :param input_path: Absolute path to folder where the splinter files have to be renamed.
+    :return:
+    """
     files = os.listdir(input_path)
     eyes = [f.split('_')[0] for f in files]
     eyes = set(eyes)

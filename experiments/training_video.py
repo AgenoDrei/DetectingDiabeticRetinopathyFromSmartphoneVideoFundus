@@ -18,7 +18,18 @@ from tqdm import tqdm
 from typing import Tuple
 from torchvision import models
 
+
 def run(base_path, model_path, gpu_name, batch_size, num_epochs):
+    """
+    Main method to train, evaluate and test the snippet-based approach to classify the Paxos dataset into refer- and nonreferable retinopathy.
+    :param base_path: Absolute path to the dataset. The folder should have folders for training (train), evaluation (val) and corresponding label files
+    :param model_path: Absolute path to the pretrained model
+    :param gpu_name: ID of the gpu (e.g. cuda0)
+    :param batch_size: Bath size
+    :param num_epochs: Maximum number of training epochs
+
+    :return: None
+    """
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
