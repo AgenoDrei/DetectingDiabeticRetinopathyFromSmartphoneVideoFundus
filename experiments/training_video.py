@@ -195,7 +195,7 @@ if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
-    parser = argparse.ArgumentParser(description='Train your eyes out')
+    parser = argparse.ArgumentParser(description='Classify a paxos dataset through snippet learning')
     parser.add_argument('--data', help='Path for training data', type=str)
     parser.add_argument('--model', help='Path for the base model', type=str)
     parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')

@@ -96,7 +96,6 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
 
 def prepare_model(model_path, hp, device):
-    # stump = models.alexnet(pretrained=True)
     stump = None
     if hp['multi_channel']:
         stump = my_inceptionv4(pretrained=False)
@@ -148,12 +147,15 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
                                     use_prefix=True)
     else:
         train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'),
-                                                  join(base_name, set_names.train), augmentations=aug_train,
+                                                  join(base_name, set_names['train']), augmentations=aug_train,
                                                   balance_ratio=hp['balance'], file_type='', use_prefix=True,
                                                   processed_suffix='_pp')
-        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names.val),
+        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name,  set_names['val']),
                                                 augmentations=aug_val,
                                                 file_type='', use_prefix=True, processed_suffix='_pp')
+        test_dataset = MultiChannelRetinaDataset(join(base_name, f'labels_{set_names["test"]}_frames.csv'), join(base_name, set_names['test']),
+                                     augmentations=aug_val, file_type='',
+                                     use_prefix=True)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -256,7 +258,7 @@ if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
-    parser = argparse.ArgumentParser(description='Train your eyes out')
+    parser = argparse.ArgumentParser(description='Instance-based learning')
     parser.add_argument('--data', help='Path for training data', type=str)
     parser.add_argument('--model', help='Path for the base model', type=str)
     parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')
