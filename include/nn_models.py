@@ -1,6 +1,13 @@
 import torch
 from torch import nn
 
+"""
+All pytorch models for the retinopathy classification.
+Right now 
+    the RetinaNet2 is used for the snippet approach
+    and the BagNet for the MIL approach.
+"""
+
 
 class RetinaNet(nn.Module):
     def __init__(self, frame_stump, num_frames=20, do_avg_pooling=True):

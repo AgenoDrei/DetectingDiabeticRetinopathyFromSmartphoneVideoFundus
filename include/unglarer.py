@@ -4,6 +4,9 @@ import numpy as np
 
 
 class GlareRemover:
+    """
+    Class for training and prediction of glares in image files using an GMM
+    """
     def __init__(self, num_cluster: int = 5, masked_class: int = 1, model_path='./gmm_model_3.mod', matrix_type=cv2.ml.EM_COV_MAT_GENERIC):
         self.n = num_cluster
         self.model_path = model_path

@@ -13,6 +13,14 @@ from albumentations.pytorch import ToTensorV2
 from nn_utils import get_video_desc
 from torch.utils.data import Dataset
 
+"""
+All datasets that are used by the different classification approaches. 
+Currently used are:
+- Retina Dataset for frames
+- Snippet Dataset 2 for video snippets
+- Bag Dataset for the MIL bags
+"""
+
 
 class RetinaDataset(Dataset):
     def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None,

@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 from skvideo import io
 import time_wrap as tw
 from mpl_toolkits.axes_grid1 import ImageGrid
-
-####################################
-######### HELPER METHODS ###########
-####################################
 from skimage import exposure, img_as_ubyte
+
+"""
+Helper methods useful to manipulate images and videos
+"""
 
 
 def load_images(path: str = './C001R_Cut', img_type: str = 'jpg') -> list:

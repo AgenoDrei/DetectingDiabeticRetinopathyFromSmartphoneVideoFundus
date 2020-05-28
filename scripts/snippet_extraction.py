@@ -9,6 +9,7 @@ import os
 WORKING_PATH = '/tmp/dr'
 RESULTS_PATH = os.path.join(WORKING_PATH, 'results')
 
+
 def run(input, output, pipeline, fps, majority, mode='snippet'):
     """
     Convert retionpathy videos to usable snippets (2 secs, 20 frames) with <majority> percent of usable frames

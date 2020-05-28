@@ -10,6 +10,10 @@ from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_sc
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import utils
 
+"""
+Utilises useful for the training and evaluation of PyTorch neural networks.
+"""
+
 
 def display_examples(ds):
     fig = plt.figure(figsize=(10, 10))
