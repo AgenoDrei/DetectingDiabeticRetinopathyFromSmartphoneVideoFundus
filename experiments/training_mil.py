@@ -37,7 +37,7 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'attention_neurons': 738,
         'bag_size': 75,
         'attention': 'normal',          # normal / gated
-        'pooling': 'max'                # avg / max / none
+        'pooling': 'avg'                # avg / max / none
     }
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
@@ -65,7 +65,8 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
 
     best_model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
                                   hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    validate(best_model, criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    _, f1 = validate(best_model, criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    return f1
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
@@ -180,7 +181,7 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
         scores.data.to_csv(f'training_mil_avg_{val_scores["f1"]}_{eye_scores["f1"]}.csv', index=False)
     else:
         eye_scores = scores.calc_scores_eye(as_dict=True)
-        writer.add_hparams(hparam_dict=hp, metric_dict=eye_scores)
+        # writer.add_hparams(hparam_dict=hp, metric_dict=eye_scores)
         scores.data.to_csv(f'{time.strftime("%Y%m%d")}_best_mil_model_{val_scores["f1"]:0.2}.csv', index=False)
     
     return running_loss / len(loader.dataset), eye_scores['f1']
