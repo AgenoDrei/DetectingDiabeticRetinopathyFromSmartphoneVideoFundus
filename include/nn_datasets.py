@@ -13,6 +13,14 @@ from albumentations.pytorch import ToTensorV2
 from nn_utils import get_video_desc
 from torch.utils.data import Dataset
 
+"""
+All datasets that are used by the different classification approaches. 
+Currently used are:
+- Retina Dataset for frames
+- Snippet Dataset 2 for video snippets
+- Bag Dataset for the MIL bags
+"""
+
 
 class RetinaDataset(Dataset):
     def __init__(self, csv_file, root_dir, file_type='.png', balance_ratio=1.0, transform=None, augmentations=None,
@@ -319,7 +327,7 @@ class PaxosBags(Dataset):
             bag_label = self.labels_df[self.labels_df.image.str.contains(eye)].iloc[0].level
             prefix = 'pos' if bag_label == 1 else 'neg'
             eye_frames = [f for f in os.listdir(join(self.root_dir, prefix)) if get_video_desc(f)['eye_id'] == eye]
-            random.shuffle(eye_frames)
+            eye_frames = random.sample(eye_frames, len(eye_frames))
             if value <= self.max_bag_size:
                 bags.append({'frames': eye_frames, 'label': bag_label, 'name': f'{eye}_{0}', 'shortname': eye})
             else:

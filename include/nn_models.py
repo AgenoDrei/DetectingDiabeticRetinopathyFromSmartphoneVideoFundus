@@ -1,6 +1,13 @@
 import torch
 from torch import nn
 
+"""
+All pytorch models for the retinopathy classification.
+Right now 
+    the RetinaNet2 is used for the snippet approach
+    and the BagNet for the MIL approach.
+"""
+
 
 class RetinaNet(nn.Module):
     def __init__(self, frame_stump, num_frames=20, do_avg_pooling=True):
@@ -126,6 +133,7 @@ class BagNet(nn.Module):
 
         A = torch.transpose(A, 1, 0)  # K x N
         A = nn.functional.softmax(A, dim=1)  # softmax over N
+        #print(A.size())
 
         M = torch.mm(A, H)  # K x L, multiply attention weights with bag elements
         y_prob = self.classifier(M)
@@ -145,7 +153,7 @@ class BagNet(nn.Module):
         Y_prob = torch.clamp(Y_prob, min=1e-5, max=1. - 1e-5)
         neg_log_likelihood = -1. * (Y * torch.log(Y_prob) + (1. - Y) * torch.log(1. - Y_prob))  # negative log bernoulli
 
-        return neg_log_likelihood, A
+        return neg_log_likelihood, A, Y_prob
 
     def _get_pooling_params(self, strategy='avg'):
         if strategy == 'avg':

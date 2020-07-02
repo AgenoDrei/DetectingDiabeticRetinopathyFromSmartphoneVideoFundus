@@ -9,6 +9,7 @@ import os
 WORKING_PATH = '/tmp/dr'
 RESULTS_PATH = os.path.join(WORKING_PATH, 'results')
 
+
 def run(input, output, pipeline, fps, majority, mode='snippet'):
     """
     Convert retionpathy videos to usable snippets (2 secs, 20 frames) with <majority> percent of usable frames
@@ -17,6 +18,7 @@ def run(input, output, pipeline, fps, majority, mode='snippet'):
     :param pipeline: Absolute path to pretrained SVM pipeline with scaling / preprocessing
     :param fps: Extracted frames per video
     :param majority: Percentage of usable frames, everything above this threshold will be saved to a new snippet
+    :param mode: Determines whether video snippets, snippet frames or frames are extracted (snippet, snippet_frames, frames)
     :return:
     """
     name_pattern = re.compile(r"([A-Z])(\d){3}[RL](\d)?")

@@ -17,28 +17,44 @@ from pretrainedmodels.models import inceptionv4
 import copy
 
 
+RES_PATH = f'{time.strftime("%Y%m%d_%H%M")}_MIL/'
+
+
 def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num_workers):
+    """
+    Main method to train, evaluate and test the multiple-instance-learning approach to classify the Paxos dataset into refer- and nonreferable retinopathy.
+    :param base_path: Absolute path to the dataset. The folder should have folders for training (train), evaluation (val) and corresponding label files
+    :param model_path: Absolute path to the pretrained model
+    :param gpu_name: ID of the gpu (e.g. cuda0)
+    :param batch_size: Bath size
+    :param num_epochs: Maximum number of training epochs
+    :param num_workers: Number of threads used for data loading
+    :return: f1-score for the evaluation (or test) set
+    """
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
     hyperparameter = {
         'data': os.path.basename(os.path.normpath(data_path)),
         'learning_rate': 1e-4,
-        'weight_decay': 1e-4,
+        'weight_decay': 1e-3,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
-        'balance': 0.4,
-        'image_size': 350,
-        'crop_size': 299,
+        'balance': 0.35,
+        'image_size': 450,
+        'crop_size': 399,
         'pretraining': True,
         'preprocessing': False,
         'stump': stump_type,
         'attention_neurons': 738,
         'bag_size': 75,
         'attention': 'normal',          # normal / gated
-        'pooling': 'max'                # avg / max / none
+        'pooling': 'avg'                # avg / max / none
     }
+    os.mkdir(RES_PATH)
+    with open(os.path.join(RES_PATH, 'hp.txt'), 'w') as f:
+        print(hyperparameter, file=f)
     aug_pipeline_train = get_training_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
     aug_pipeline_val = get_validation_pipeline(hyperparameter['image_size'], hyperparameter['crop_size'])
 
@@ -65,7 +81,8 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
 
     best_model = train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer,
                                   hyperparameter, num_epochs=hyperparameter['num_epochs'], description=desc)
-    validate(best_model, criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    _, f1 = validate(best_model, criterion, loaders[1], device, writer, hyperparameter, hyperparameter['num_epochs'], calc_roc=True)
+    return f1
 
 
 def prepare_dataset(data_path, hp, aug_train, aug_val, num_workers):
@@ -110,7 +127,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
                 description='Vanilla'):
     print('Training model...')
     since = time.time()
-    best_f1_val = -1
+    best_f1_val, val_f1 = -1, -1
     best_model = None
 
     for epoch in range(num_epochs):
@@ -127,7 +144,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
             model.train()
             optimizer.zero_grad()
 
-            loss, _ = model.calculate_objective(inputs, label)
+            loss, _, _ = model.calculate_objective(inputs, label)
             error, pred = model.calculate_classification_error(inputs, label)
             
             loss.backward()
@@ -150,7 +167,9 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     time_elapsed = time.time() - since
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
     print(f'Best f1 score: {best_f1_val}, model saved...')
-
+    
+    torch.save(model.state_dict(), os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_last_model_score{val_f1}.pth'))
+    torch.save(best_model.state_dict(), os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_last_model_score{best_f1_val}.pth'))
     return best_model
 
 
@@ -165,23 +184,25 @@ def validate(model, criterion, loader, device, writer, hp, cur_epoch, calc_roc=F
         eye_ids = batch['name']
 
         with torch.no_grad():
-            loss, attention_weights = model.calculate_objective(inputs, labels)
+            loss, attention_weights, prob = model.calculate_objective(inputs, labels)
             error, preds = model.calculate_classification_error(inputs, labels) 
             running_loss += loss.item()
 
-        scores.add(preds, labels, tags=eye_ids, attention=attention_weights, files=batch['frame_names'])
-    
+        scores.add(preds, labels, probs=prob, tags=eye_ids, attention=attention_weights, files=batch['frame_names'])
+        #print(len(attention_weights), len(batch['frame_names']))
+        #print(attention_weights)
+
     val_scores = scores.calc_scores(as_dict=True)
     val_scores['loss'] = running_loss / len(loader.dataset)
     if not calc_roc:
         write_scores(writer, 'val', val_scores, cur_epoch)
         eye_scores = scores.calc_scores_eye(as_dict=True)
         write_scores(writer, 'eval', eye_scores, cur_epoch)
-        scores.data.to_csv(f'training_mil_avg_{val_scores["f1"]}_{eye_scores["f1"]}.csv', index=False)
+        if eye_scores['f1'] > 0.1: scores.data.to_csv(os.path.join(RES_PATH, f'training_mil_avg_{val_scores["f1"]}_{eye_scores["f1"]}.csv'), index=False)
     else:
         eye_scores = scores.calc_scores_eye(as_dict=True)
-        writer.add_hparams(hparam_dict=hp, metric_dict=eye_scores)
-        scores.data.to_csv(f'{time.strftime("%Y%m%d")}_best_mil_model_{val_scores["f1"]:0.2}.csv', index=False)
+        # writer.add_hparams(hparam_dict=hp, metric_dict=eye_scores)
+        scores.data.to_csv(os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_best_mil_model_{val_scores["f1"]:0.2}.csv'), index=False)
     
     return running_loss / len(loader.dataset), eye_scores['f1']
 

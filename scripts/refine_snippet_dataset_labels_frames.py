@@ -8,6 +8,14 @@ from tqdm import tqdm
 COL_CLASS = 'level'
 
 def run(input_path, labels_path, dataset, mode):
+    """
+    Takes a CSV file that only holds eye-ids. For every frame corresponding to these frames a new entry with the same DR grading will be created.
+    :param input_path: Absolute path to input folder
+    :param labels_path: Absolute path to label file that will be refined
+    :param dataset: Dataset name (train/val/...)
+    :param mode: Determines operation mode (snippets / frames)
+    :return:
+    """
     df = pd.read_csv(labels_path)
     df[COL_CLASS] = df[COL_CLASS].astype(int)
     df_refined = pd.DataFrame(columns=df.columns)

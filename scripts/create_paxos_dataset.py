@@ -13,6 +13,15 @@ from time_wrap import profile
 
 @profile
 def run(input_path, output_path, label_path, val_size=0.2, file_type='.png'):
+    """
+    Script to transform snippet frames into a dataset for the later classification
+    :param input_path: Absolute input path
+    :param output_path: Absolute output path
+    :param label_path: Absolute path to the excel file describing the Paxos dataset
+    :param val_size: Size of the validation set
+    :param file_type: File type (.png, .jpg, .MOV)
+    :return:
+    """
     assert not os.path.exists(output_path), 'Output folder cannot exist!'
     create_folder_structure(output_path)
     new_labels = move_files_into_class_folders(input_path, output_path, label_path, file_type)

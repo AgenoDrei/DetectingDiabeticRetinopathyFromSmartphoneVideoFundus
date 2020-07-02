@@ -14,7 +14,18 @@ from tqdm import tqdm
 import pandas as pd
 
 
+
+
 def run(data_path, labels_path, model_path, gpu_name, bs):
+    """
+    Script to evaluate test results on a dataset, cannot be used for training
+    :param data_path: Absolute path to the data
+    :param labels_path: Absolute path to the data label file
+    :param model_path: Absolute path to the model
+    :param gpu_name: ID of the gpu
+    :param bs: Batch size
+    :return:
+    """
     image_size = 450
     crop_size = 399
     aug_pipeline = alb.Compose([

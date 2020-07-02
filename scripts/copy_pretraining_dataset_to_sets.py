@@ -9,6 +9,13 @@ from tqdm import tqdm
 DATA_FOLDER = 'combined'
 
 def run(input_path, labels_path, val_size):
+    """
+    Copy Paxos frames to a training and validation folder
+    :param input_path: Absolute path to input folder
+    :param labels_path: Absolute path to a label file
+    :param val_size: Size of the validation set
+    :return:
+    """
     df = pd.read_csv(labels_path)
     df['image'] = df.image.astype(str)
     df_val = pd.DataFrame(columns=df.columns)
@@ -37,7 +44,7 @@ def process_row(path, image, level, set, set_df):
 if __name__ == '__main__':
     a = argparse.ArgumentParser(description='Split Kaggle dataset into train and validation set using stratified shuffling')
     a.add_argument("--input", help="absolute path to input folder")
-    a.add_argument("--labels", help="absolute path to input folder")
+    a.add_argument("--labels", help="absolute path to the label file")
     a.add_argument("--valsize", help="Percentage of validation set size", type=float, default=0.1)
     args = a.parse_args()
 

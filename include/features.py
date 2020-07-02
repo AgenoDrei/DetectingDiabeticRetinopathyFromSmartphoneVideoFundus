@@ -5,6 +5,10 @@ import utils as utl
 from sklearn.base import BaseEstimator, TransformerMixin
 from joblib import Parallel, delayed
 
+"""
+Helper methods to extract features for the SVM training and prediction.
+"""
+
 
 def extract_feature_vector(X: np.array, bin_size: int = 16, haralick_dist: int = 4) -> np.ndarray:
     channels = cv2.split(X)

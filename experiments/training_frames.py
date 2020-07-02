@@ -21,9 +21,20 @@ from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from torchvision import models
 
 
 def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
+    """
+    Main method to train, evaluate and test the instanced-based approach to classify the Paxos dataset into refer- and nonreferable retinopathy.
+    :param base_path: Absolute path to the dataset. The folder should have folders for training (train), evaluation (val) and corresponding label files
+    :param model_path: Absolute path to the pretrained model
+    :param gpu_name: ID of the gpu (e.g. cuda0)
+    :param batch_size: Bath size
+    :param num_epochs: Maximum number of training epochs
+    :param num_workers: Number of threads used for data loading
+    :return: f1-score for the evaluation (or test) set
+    """
     device = torch.device(gpu_name if torch.cuda.is_available() else "cpu")
     print(f'Using device {device}')
 
@@ -35,7 +46,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'freeze': 0.0,
-        'balance': 0.45,
+        'balance': 0.3,
         'image_size': 450,
         'crop_size': 399,
         'pretraining': True,
@@ -46,7 +57,8 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
         'narrow_model': False,
         'remove_glare': False,
         'voting_percentage': 1.0,
-        'validation': 'tv' # tvt = train / val / test, tt = train(train + val) / test
+        'validation': 'tv', # tvt = train / val / test, tt = train(train + val) / test, tv = train / val
+        'network': 'alexnet' # alexnet / inception
     }
     aug_pipeline_train = A.Compose([
         A.CLAHE(always_apply=hyperparameter['use_clahe'], p=1.0 if hyperparameter['use_clahe'] else 0.0),
@@ -78,8 +90,9 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
                               num_workers)
     net = prepare_model(model_path, hyperparameter, device)
 
-    optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'],
-                              weight_decay=hyperparameter['weight_decay'])
+    optimizer_ft = optim.Adam([{'params': net.features.parameters(), 'lr': 1e-5},
+                               {'params': net.classifier.parameters()}],
+            lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = nn.CrossEntropyLoss()
     plateau_scheduler = lr_scheduler.ReduceLROnPlateau(optimizer_ft, mode='min', factor=0.1, patience=10, verbose=True)
 
@@ -93,7 +106,6 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs, num_workers):
 
 
 def prepare_model(model_path, hp, device):
-    # stump = models.alexnet(pretrained=True)
     stump = None
     if hp['multi_channel']:
         stump = my_inceptionv4(pretrained=False)
@@ -101,21 +113,24 @@ def prepare_model(model_path, hp, device):
     elif hp['narrow_model']:
         stump = NarrowInceptionV1(num_classes=2)
         hp['pretraining'] = False
-    else:
+    elif hp['network'] == 'inception':
         stump = ptm.inceptionv4()
         num_ftrs = stump.last_linear.in_features
         stump.last_linear = nn.Linear(num_ftrs, 2)
+    elif hp['network'] == 'alexnet':
+        stump = models.alexnet(pretrained=True)
+        stump.classifier[-1] = nn.Linear(stump.classifier[-1].in_features, 2)
 
     if hp['pretraining']:
         stump.load_state_dict(torch.load(model_path, map_location=device))
         print('Loaded stump: ', len(stump.features))
     stump.train()
 
-    for i, child in enumerate(stump.features.children()):
-        if i < len(stump.features) * hp['freeze']:
-            for param in child.parameters():
-                param.requires_grad = False
-            dfs_freeze(child)
+    #for i, child in enumerate(stump.features.children()):
+    #    if i < len(stump.features) * hp['freeze']:
+    #        for param in child.parameters():
+    #            param.requires_grad = False
+    #        dfs_freeze(child)
     stump.to(device)
     return stump
 
@@ -142,12 +157,15 @@ def prepare_dataset(base_name: str, hp, aug_train, aug_val, num_workers):
                                     use_prefix=True)
     else:
         train_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_train_frames.csv'),
-                                                  join(base_name, set_names.train), augmentations=aug_train,
+                                                  join(base_name, set_names['train']), augmentations=aug_train,
                                                   balance_ratio=hp['balance'], file_type='', use_prefix=True,
                                                   processed_suffix='_pp')
-        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name, set_names.val),
+        val_dataset = MultiChannelRetinaDataset(join(base_name, 'labels_val_frames.csv'), join(base_name,  set_names['val']),
                                                 augmentations=aug_val,
                                                 file_type='', use_prefix=True, processed_suffix='_pp')
+        test_dataset = MultiChannelRetinaDataset(join(base_name, f'labels_{set_names["test"]}_frames.csv'), join(base_name, set_names['test']),
+                                     augmentations=aug_val, file_type='',
+                                     use_prefix=True)
 
     sample_weights = [train_dataset.get_weight(i) for i in range(len(train_dataset))]
     sampler = torch.utils.data.sampler.WeightedRandomSampler(sample_weights, len(train_dataset), replacement=True)
@@ -250,7 +268,7 @@ if __name__ == '__main__':
     print(f'INFO> Using python version {sys.version_info}')
     print(f'INFO> Using torch with GPU {torch.cuda.is_available()}')
 
-    parser = argparse.ArgumentParser(description='Train your eyes out')
+    parser = argparse.ArgumentParser(description='Instance-based learning')
     parser.add_argument('--data', help='Path for training data', type=str)
     parser.add_argument('--model', help='Path for the base model', type=str)
     parser.add_argument('--gpu', help='GPU name', type=str, default='cuda:0')

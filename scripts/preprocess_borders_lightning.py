@@ -29,6 +29,15 @@ def crop_image_from_gray(img, tol=7):
 
 
 def preprocess(img_path, input_path, output_path, light=False, sigma=10):
+    """
+    Removes black borders from eye images, optional: apply graham filter
+    :param img_path: Path to image
+    :param input_path: Absolute path to image folder
+    :param output_path: Absolute path to output folder
+    :param light: Flag for improving light conditions
+    :param sigma: Sigma value for gaussian
+    :return: preprocessed image
+    """
     image = cv2.imread(join(input_path, img_path))
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
