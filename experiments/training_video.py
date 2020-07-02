@@ -34,7 +34,7 @@ def run(base_path, model_path, gpu_name, batch_size, num_epochs):
         'freeze': 0.0,
         'balance': 0.4,
         'num_frames': 50,
-        'pooling': 'avg', # max / avg
+        'pooling': None, # max / avg
         'bag': 'snippet', # snippet / random / snippet sampling
         'pretraining': True,
         'preprocessing': False,
@@ -185,8 +185,9 @@ def validate(model, criterion, loader, device, writer, cur_epoch, calc_roc=False
     val_scores['loss'] = running_loss / len(loader.dataset)
     write_scores(writer, 'val', val_scores, cur_epoch)
 
-    video_scores = scores.calc_scores_eye(as_dict=True)
+    video_scores = scores.calc_scores_eye(as_dict=True, ratio=0.55)
     write_scores(writer, 'eval', video_scores, cur_epoch)
+    scores.data.to_csv(f'training_video_{video_scores["f1"]}.csv', index=False)
 
     return running_loss / len(loader.dataset), val_scores['f1']
 

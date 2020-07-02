@@ -19,7 +19,7 @@ if __name__ == '__main__':
     avg_f1 = 0
     f1_list = []
     for i in range(args.folds):
-        f1 = run(join(args.data, f'fold{i}'), args.model, args.gpu, args.bs, args.epochs, 28)
+        f1 = run(join(args.data, f'fold{i}'), args.model, args.gpu, args.bs, args.epochs, 32)
         f1_list.append(f1)
         avg_f1 += f1 / args.folds
     
