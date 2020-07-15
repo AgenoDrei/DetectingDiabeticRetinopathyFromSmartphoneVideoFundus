@@ -232,7 +232,8 @@ class Scores:
                    probs.tolist() if probs is not None else [0 for i in range(len(labels.tolist()))], \
                    attention.tolist() if attention is not None else [0 for i in range(len(labels.tolist()))], \
                    [files] if files is not None else ["" for i in range(len(labels.tolist()))]
-        
+       
+        # if attention is not None: print(attention.tolist()[0])
         # print(len(new_data[5]), len(new_data[4]), len(labels))
 
         new_data_dict = {col: new_data[i] for i, col in enumerate(self.columns)}

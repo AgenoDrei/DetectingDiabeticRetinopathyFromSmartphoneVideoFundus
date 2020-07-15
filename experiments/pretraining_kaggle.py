@@ -46,11 +46,11 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
         'network': 'Inception',   # AlexNet / VGG / Inception / Efficient 
-        'image_size': 450,
+        'image_size': 425,
         'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.25,
-        'preprocessing': False
+        'preprocessing': True
     }
     aug_pipeline_train = alb.Compose([
         alb.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
@@ -176,6 +176,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     print(f'{time.strftime("%H:%M:%S")}> Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s with best f1 score of {best_f1_val}')
 
     validate(model, criterion, loaders[1], device, writer, num_epochs, calc_roc=True)
+    torch.save(model.state_dict(), f'KAGGLE_last_model_{model.__class__.__name__}_{val_f1:0.2}.pth')
     return model
 
 

@@ -53,8 +53,17 @@ class RetinaNet2(nn.Module):
 
         if stump_type == 'inception':
             self.features2 = nn.Identity()
-            self.pooling = self.stump.avg_pool if pooling_strategy == 'avg' else nn.MaxPool2d(self.stump.avg_pool.kernel_size, stride=self.stump.avg_pool.stride)
-            self.after_pooling = nn.Linear(1536*1*1, 2)
+            feature_size = 1536*1*1
+            if pooling_strategy == 'avg':
+                self.pooling = self.stump.avg_pool
+            elif pooling_strategy == 'max':
+                self.pooling = nn.MaxPool2d(self.stump.avg_pool.kernel_size, stride=self.stump.avg_pool.stride)
+            else:
+                self.pooling = nn.Identity()
+                feature_size = 1536*11*11
+
+            # self.pooling = self.stump.avg_pool if pooling_strategy == 'avg' else nn.MaxPool2d(self.stump.avg_pool.kernel_size, stride=self.stump.avg_pool.stride)
+            self.after_pooling = nn.Linear(feature_size, 2)
         elif stump_type == 'alexnet':
             self.pooling = self.stump.avgpool
             self.features2 = self.stump.classifier[:-1] # N x 4096
@@ -124,6 +133,7 @@ class BagNet(nn.Module):
 
         A = torch.transpose(A, 1, 0)  # K x N
         A = nn.functional.softmax(A, dim=1)  # softmax over N
+        #print(A.size())
 
         M = torch.mm(A, H)  # K x L, multiply attention weights with bag elements
         y_prob = self.classifier(M)
@@ -143,7 +153,7 @@ class BagNet(nn.Module):
         Y_prob = torch.clamp(Y_prob, min=1e-5, max=1. - 1e-5)
         neg_log_likelihood = -1. * (Y * torch.log(Y_prob) + (1. - Y) * torch.log(1. - Y_prob))  # negative log bernoulli
 
-        return neg_log_likelihood, A
+        return neg_log_likelihood, A, Y_prob
 
     def _get_pooling_params(self, strategy='avg'):
         if strategy == 'avg':
