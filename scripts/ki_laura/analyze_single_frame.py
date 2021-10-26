@@ -13,14 +13,14 @@ import albumentations as alb
 @click.command()
 @click.option('--input_path', '-i', help='Path to the image being analyzed', required=True)
 @click.option('--model_path', '-r', help='Path to the trained model', required=True)
-@click.option('--processed/--unprocessed', default=False)
-def run(input_path, model_path, processed):
+@click.option('--process/--preprocessed', help='Is the image alreadey pre-processed (cropped) or in original form', default=False)
+def run(input_path, model_path, process):
     # Loading image
     img = cv2.imread(input_path)
     if (type(img) != np.ndarray and type(img) != np.memmap) or img is None:
         print('Invalid input image: ', input_path)
         return
-    if not processed:
+    if process:
         img_enh = enhance_contrast_image(img, clip_limit=3.5, tile_size=12)
         mask, circle = get_retina_mask(img_enh)
         if circle[2] == 0:
