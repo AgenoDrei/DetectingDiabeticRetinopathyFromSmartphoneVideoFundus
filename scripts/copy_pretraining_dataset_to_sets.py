@@ -6,7 +6,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedShuffleSplit
 from tqdm import tqdm
 
-DATA_FOLDER = 'combined'
+DATA_FOLDER = ''
 
 def run(input_path, labels_path, val_size):
     """
@@ -35,6 +35,9 @@ def run(input_path, labels_path, val_size):
 
 
 def process_row(path, image, level, set, set_df):
+    if not os.path.exists(join(path, DATA_FOLDER, image + '.jpg')):
+        print(f'Skipping file {image}.jpg because it does not exist in the INPUT folder')
+        return set_df
     severity = 1 if level > 0 else 0
     set_df = set_df.append({'image': image, 'level': severity}, ignore_index=True)
     copy(join(path, DATA_FOLDER, image + '.jpg'), join(path, set, image + '.jpg'))

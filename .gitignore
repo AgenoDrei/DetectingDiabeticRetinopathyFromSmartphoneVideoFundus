@@ -112,3 +112,4 @@ project/models/
 
 /**/*.pth
 /**/*.csv
+experiments/202**/

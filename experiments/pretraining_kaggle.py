@@ -41,16 +41,17 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
     hyperparameter = {
         'data': os.path.basename(base_path),
         'learning_rate': 1e-4,
-        'weight_decay': 1e-4,
+        'weight_decay': 1e-3,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'network': 'Inception',   # AlexNet / VGG / Inception / Efficient 
+        'network': 'AlexNet',   # AlexNet / VGG / Inception / Efficient 
         'image_size': 425,
         'crop_size': 399,
         'freeze': 0.0,
         'balance': 0.25,
-        'preprocessing': True
+        'preprocessing': False,
+        'pretraining': '/home/simon/Data/20211020_stump_extracted.pth'
     }
     aug_pipeline_train = alb.Compose([
         alb.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
@@ -76,7 +77,7 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
     print(f'Hyperparameter info:\n {hyperparameter_str}')
     loaders = prepare_dataset(os.path.join(base_path, ''), hyperparameter, aug_pipeline_train, aug_pipeline_val, num_workers)
 
-    net: inceptionv4 = prepare_model(hyperparameter)
+    net: inceptionv4 = prepare_model(hyperparameter, device)
 
     optimizer_ft = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=hyperparameter['learning_rate'], weight_decay=hyperparameter['weight_decay'])
     criterion = CrossEntropyLoss()
@@ -87,7 +88,7 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
     train_model(net, criterion, optimizer_ft, plateau_scheduler, loaders, device, writer, num_epochs=hyperparameter['num_epochs'], description=desc)
 
 
-def prepare_model(hp):
+def prepare_model(hp, device):
     net = None
     if hp['network'] == 'AlexNet':
         net = models.alexnet(pretrained=True)
@@ -105,19 +106,22 @@ def prepare_model(hp):
         net = inceptionv4()
         num_ftrs = net.last_linear.in_features
         net.last_linear = Linear(num_ftrs, 2)
-        for i, child in enumerate(net.features.children()):
-            if i < len(net.features) * hp['freeze']:
-                for param in child.parameters():
-                    param.requires_grad = False
-                nn_utils.dfs_freeze(child)
+    for i, child in enumerate(net.features.children()):
+        if i < len(net.features) * hp['freeze']:
+            for param in child.parameters():
+                param.requires_grad = False
+            nn_utils.dfs_freeze(child)
 
+    if hp['pretraining']:
+        net.load_state_dict(torch.load(hp['pretraining'], map_location=device))
+        print('Loaded stump: ', len(net.features))
     net.train()
     #print(f'Model info: {net.__class__.__name__}, layer: {len(net)}, #frozen layer: {len(net) * hp["freeze"]}')
     return net
 
 
 def prepare_dataset(base_name: str, hp, aug_pipeline_train, aug_pipeline_val, num_workers):
-    set_names = ('train2', 'val2') if not hp['preprocessing'] else ('train_pp', 'val_pp')
+    set_names = ('train', 'val') if not hp['preprocessing'] else ('train_pp', 'val_pp')
     train_dataset = RetinaDataset(join(base_name, 'labels_train.csv'), join(base_name, set_names[0]),
                                   augmentations=aug_pipeline_train, balance_ratio=hp['balance'], file_type='.jpg')
     val_dataset = RetinaDataset(join(base_name, 'labels_val.csv'), join(base_name, set_names[1]),
@@ -168,7 +172,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            torch.save(model.state_dict(), f'KAGGLE_best_model_{model.__class__.__name__}_{val_f1:0.2}.pth')
+            # torch.save(model.state_dict(), f'KAGGLE_best_model_{model.__class__.__name__}_{val_f1:0.2}.pth')
 
         scheduler.step(val_loss)
 

@@ -50,7 +50,7 @@ def run(data_path, model_path, stump_type, gpu_name, batch_size, num_epochs, num
         'attention_neurons': 738,
         'bag_size': 75,
         'attention': 'normal',          # normal / gated
-        'pooling': 'avg'                # avg / max / none
+        'pooling': 'max'                # avg / max / none
     }
     os.mkdir(RES_PATH)
     with open(os.path.join(RES_PATH, 'hp.txt'), 'w') as f:
@@ -106,6 +106,11 @@ def prepare_network(model_path, hp, device, whole_net=False):
         stump: models.AlexNet = models.alexnet(pretrained=True)
         num_features = stump.classifier[-1].in_features
         stump.classifier[-1] = nn.Linear(num_features, 2)
+        for i, child in enumerate(stump.features.children()):
+            if i < len(stump.features) * hp['freeze']:
+                for param in child.parameters():
+                    param.requires_grad = False
+
     elif hp['stump'] == 'inception':
         stump = inceptionv4()
         num_ftrs = stump.last_linear.in_features
@@ -169,7 +174,8 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
     print(f'Best f1 score: {best_f1_val}, model saved...')
     
     torch.save(model.state_dict(), os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_last_model_score{val_f1}.pth'))
-    torch.save(best_model.state_dict(), os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_last_model_score{best_f1_val}.pth'))
+    torch.save(best_model.state_dict(), os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_best_model_score{best_f1_val}.pth'))
+    torch.save(model.stump.state_dict(), os.path.join(RES_PATH, f'{time.strftime("%Y%m%d")}_stump_score{val_f1}.pth'))
     return best_model
 
 
