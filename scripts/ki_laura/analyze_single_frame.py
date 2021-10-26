@@ -2,9 +2,11 @@ import click
 import torch
 import numpy as np
 import cv2
+import os
 from torchvision import models
 from torch import nn
 from utils import enhance_contrast_image, get_retina_mask, crop_to_circle
+from albumentations.pytorch import ToTensorV2
 import albumentations as alb
 
 
@@ -26,13 +28,14 @@ def run(input_path, model_path, processed):
             return
         img = cv2.bitwise_and(img, mask)
         img = crop_to_circle(img, circle)
+    print('Loaded image successfully...')
 
     # Necessary image augmentations
     aug_pipeline = alb.Compose([
         alb.Resize(425, 425, always_apply=True, p=1.0),
         alb.CenterCrop(399, 399, always_apply=True, p=1.0),
         alb.Normalize(always_apply=True, p=1.0),
-        alb.pytorch.ToTensorV2(always_apply=True, p=1.0)
+        ToTensorV2(always_apply=True, p=1.0)
     ], p=1.0)
     img_tensor = aug_pipeline(image=img)['image']
 
@@ -42,11 +45,16 @@ def run(input_path, model_path, processed):
     model.classifier[-1] = nn.Linear(model.classifier[-1].in_features, 2)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
-    print('Loaded model: ', len(model.features))
+    print('Loaded model successfully...')
 
     #Prediction
-    prediction = model(img_tensor)
-    print(f'Prediction for image {input_path} with the model {model_path}: {prediction}')
+    id_to_class = {0: 'no_retinopathy', 1: 'retinopathy'}
+    outputs = model(img_tensor.unsqueeze(0))
+    _, prediction = torch.max(outputs, 1)
+    prediction = prediction[0].item() 
+    print()
+    print(f'Prediction for image {os.path.basename(input_path)} with the model {os.path.basename(model_path)}:')
+    print(f'------ {id_to_class[prediction]} ------')    
 
 
 if __name__ == '__main__':
