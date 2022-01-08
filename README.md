@@ -1,6 +1,6 @@
 # Readme
 
-Repository for my master thesis and the corresponding source code.
+Repository for the publication "Detecting Diabetic Retinopathy From Smartphone Video Fundus" and the corresponding source code for the MICCAI OIMA7.
 
 ## Folder Structure
 * **experiments**: Python scripts and jupyter notebooks for experiments carried out. Code for the training of models for video / frame / MIL approaches.
