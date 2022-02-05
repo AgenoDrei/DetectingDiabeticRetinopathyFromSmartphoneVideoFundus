@@ -98,15 +98,15 @@ def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
 
 
 ################### Image functions ##################
-def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75) -> (np.ndarray, tuple):
+def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75, min_radius = 200) -> (np.ndarray, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
     circle = None
 
     # detect small lens
-    small_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=400,
-                                     maxRadius=470, param1=hough_param, param2=60)
+    small_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=min_radius,
+                                     maxRadius=min_radius+75, param1=hough_param, param2=60)
     if small_circles is not None:
         small_circles = np.round(small_circles[0, :]).astype("int")
         small_circles = [(x, y, r) for (x, y, r) in small_circles if
@@ -114,8 +114,8 @@ def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: in
                              1] / 3 * 2]
         circle = sorted(small_circles, key=lambda xyr: xyr[2])[0] if len(small_circles) > 0 else None
     else:
-        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=470,
-                                         maxRadius=570, param1=hough_param, param2=40)
+        large_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, img.shape[0] / 8, minRadius=min_radius+75,
+                                         maxRadius=min_radius+150, param1=hough_param, param2=40)
         if large_circles is not None:
             large_circles = np.round(large_circles[0, :]).astype("int")
             large_circles = [(x, y, r) for (x, y, r) in large_circles if
