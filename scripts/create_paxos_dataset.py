@@ -4,11 +4,11 @@ import os
 from pathlib import Path
 import pandas as pd
 from os.path import join
-from nn_processing import copy_corresponding_files
-from nn_utils import get_video_desc
+from include.nn_processing import copy_corresponding_files
+from include.nn_utils import get_video_desc
 from sklearn.model_selection import StratifiedShuffleSplit
 from tqdm import tqdm
-from time_wrap import profile
+from include.time_wrap import profile
 
 
 @profile
