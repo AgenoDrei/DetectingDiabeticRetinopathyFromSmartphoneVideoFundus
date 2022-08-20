@@ -98,7 +98,36 @@ def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
 
 
 ################### Image functions ##################
-def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75, min_radius = 200) -> (np.ndarray, tuple):
+def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75, min_radius = 200, speedup = 4) -> (np.ndarray, tuple):
+    h, w = img.shape[0] // speedup, img.shape[1] // speedup
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.resize(gray, dsize=(w, h))
+    img_blur = cv2.medianBlur(gray, 3)
+    
+    min_radius = min_radius // speedup
+    mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
+    circle = None
+
+    # detect lens
+    small_circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, 1, gray.shape[0] / 8, minRadius=min_radius,
+                                     maxRadius=min_radius+(300 // speedup), param1=hough_param, param2=60)
+    if small_circles is not None:
+        small_circles = np.round(small_circles[0, :]).astype("int")
+        small_circles = [(x, y, r) for (x, y, r) in small_circles if
+                         gray.shape[0] / 3 < y < gray.shape[0] / 3 * 2 and gray.shape[1] / 3 < x < gray.shape[1] / 3 * 2]
+        circle = sorted(small_circles, key=lambda xyr: xyr[2])[0] if len(small_circles) > 0 else None
+
+    if circle is not None:
+        (x, y, r) = circle
+        
+        r -= radius_reduction
+        cv2.circle(mask, (x*speedup, y*speedup), r*speedup, (255, 255, 255,), thickness=-1)
+        return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (x*speedup, y*speedup, r*speedup)
+    else:
+        print('UTIL> No mask found')
+        return cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (0, 0, 0)
+
+def get_retina_mask_old(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75, min_radius = 200) -> (np.ndarray, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')
