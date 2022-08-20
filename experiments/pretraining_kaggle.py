@@ -45,13 +45,13 @@ def run(base_path, gpu_name, batch_size, num_epochs, num_workers):
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'optimizer': optim.Adam.__name__,
-        'network': 'AlexNet',   # AlexNet / VGG / Inception / Efficient 
-        'image_size': 425,
-        'crop_size': 399,
+        'network': 'Efficient',   # AlexNet / VGG / Inception / Efficient 
+        'image_size': 700,
+        'crop_size': 600,
         'freeze': 0.0,
         'balance': 0.25,
         'preprocessing': False,
-        'pretraining': '/home/simon/Data/20211020_stump_extracted.pth'
+        'pretraining': None #'/home/simon/Data/20211020_stump_extracted.pth'
     }
     aug_pipeline_train = alb.Compose([
         alb.Resize(hyperparameter['image_size'], hyperparameter['image_size'], always_apply=True, p=1.0),
@@ -99,9 +99,12 @@ def prepare_model(hp, device):
         num_ftrs = net.classifier[-1].in_features
         net.classifier[-1] = Linear(num_ftrs, 2)
     elif hp['network'] == 'Efficient':
-        net = EfficientNet.from_pretrained('efficientnet-b3')
-        num_ftrs = net._fc.in_features
-        net._fc = Linear(num_ftrs, 2)
+        #net = EfficientNet.from_pretrained('efficientnet-b7')
+        net = models.efficientnet_b7(pretrained=True)
+        #num_ftrs = net._fc.in_features
+        #net._fc = Linear(num_ftrs, 2)
+        num_ftrs = net.classifier[-1].in_features
+        net.classifier[-1] = Linear (num_ftrs, 2)
     elif hp['network'] == 'Inception':
         net = inceptionv4()
         num_ftrs = net.last_linear.in_features
@@ -172,7 +175,7 @@ def train_model(model, criterion, optimizer, scheduler, loaders, device, writer,
 
         if val_f1 > best_f1_val:
             best_f1_val = val_f1
-            # torch.save(model.state_dict(), f'KAGGLE_best_model_{model.__class__.__name__}_{val_f1:0.2}.pth')
+            torch.save(model.state_dict(), f'SINGLEFRAME_best_model_{model.__class__.__name__}_{val_f1:0.2}.pth')
 
         scheduler.step(val_loss)
 

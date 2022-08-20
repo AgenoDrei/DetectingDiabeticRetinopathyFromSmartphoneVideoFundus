@@ -19,6 +19,7 @@ SUBFOLDER_FRAMES = 'frames'
 SUBFOLDER_PROCESSED = 'processed'
 SUBFOLDER_RESULTS = 'results'
 NUM_HARALICK_FEATURES = 84
+MAX_JOBS = 16
 
 @tw.profile
 def run(input_path, output_path, model_path, fps=10):
@@ -29,7 +30,7 @@ def run(input_path, output_path, model_path, fps=10):
     utl.extract_video_frames(str(input_path), join(output_path, SUBFOLDER_FRAMES), frames_per_second=fps)
 
     frame_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key=lambda f: int(os.path.splitext(f)[0].split('_')[1]))
-    features = job.Parallel(n_jobs=-1, verbose=0, timeout=200)(job.delayed(process_video_frame)(output_path, f, extractor) for f in tqdm(frame_paths, total=len(frame_paths)))
+    features = job.Parallel(n_jobs=MAX_JOBS, verbose=0, timeout=200)(job.delayed(process_video_frame)(output_path, f, extractor) for f in tqdm(frame_paths, total=len(frame_paths)))
     X_test = np.array(features)
     if X_test.shape[0] == 0:
         return

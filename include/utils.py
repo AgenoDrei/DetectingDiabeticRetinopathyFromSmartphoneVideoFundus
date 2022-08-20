@@ -98,7 +98,7 @@ def pad_image_to_size(img: np.ndarray, pref_size: tuple) -> np.ndarray:
 
 
 ################### Image functions ##################
-def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75, min_radius = 200) -> (np.ndarray, tuple):
+def get_retina_mask(img: np.ndarray, radius_reduction: int = 20, hough_param: int = 75, min_radius = 300) -> (np.ndarray, tuple):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(gray, 5)
     mask = np.zeros((img.shape[0], img.shape[1]), dtype='uint8')

@@ -22,6 +22,7 @@ SUBFOLDER_RESULTS = 'results'
 NUM_HARALICK_FEATURES = 84
 FRAMES_PER_SNIPPET = 20
 BATCH_SIZE = 480
+MAX_JOBS = 16
 
 
 @tw.profile
@@ -41,7 +42,7 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
 
     utl.extract_video_frames(input_path, join(output_path, SUBFOLDER_FRAMES), frames_per_second=fps)
 
-    X_test = np.empty((0, 156), dtype=np.float)
+    X_test = np.empty((0, 156), dtype=float)
     file_paths = sorted(os.listdir(join(output_path, SUBFOLDER_FRAMES)), key=lambda f: int(os.path.splitext(f)[0].split('_')[1]))
     for i in trange(0, len(file_paths), BATCH_SIZE):
         start = time.monotonic()
@@ -56,7 +57,7 @@ def run(input_path: str, output_path: str, model_path: str, fps: int = 10, major
         # print(f'VPRO> End: {time.monotonic()-start:.2f}')
         # print(f'VPRO> Batch shape: {features.shape}, cur X_test shape: {X_test.shape}')
 
-        features = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(process_batch_frame)(f, file_paths, output_path, extractor) for f in range(i, i+BATCH_SIZE))
+        features = job.Parallel(n_jobs=MAX_JOBS, verbose=0)(job.delayed(process_batch_frame)(f, file_paths, output_path, extractor) for f in range(i, i+BATCH_SIZE))
         features = np.array(features)
         X_test = np.append(X_test, features, axis=0)
 
@@ -125,7 +126,7 @@ def majority_vote(y_pred, majority: float = 0.65) -> list:
 def write_snippets_to_disk(idxs, output_path, name:str = 'Output', fps: int = 10, only_frames: bool = False):
     idx = 0
     for start, end, conf in idxs:
-        frames = job.Parallel(n_jobs=-1, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_PROCESSED, f'{j}.jpg')) for j in range(start, end))
+        frames = job.Parallel(n_jobs=MAX_JOBS, verbose=0)(job.delayed(cv2.imread)(join(output_path, SUBFOLDER_PROCESSED, f'{j}.jpg')) for j in range(start, end))
         frames = [np.zeros((850, 850, 3), dtype=np.uint8) if f is None or f.size == 0 else f for f in frames]
         max_height = max(frames, key=lambda img: img.shape[0]).shape[0]
         max_width = max(frames, key=lambda img: img.shape[1]).shape[1]
